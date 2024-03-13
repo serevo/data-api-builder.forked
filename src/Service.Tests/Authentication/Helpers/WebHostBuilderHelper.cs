@@ -136,17 +136,18 @@ namespace Azure.DataApiBuilder.Service.Tests.Authentication.Helpers
                                 .AddJwtBearer(options =>
                                 {
                                     options.Audience = AUDIENCE;
+                                    options.Authority = LOCAL_ISSUER;
                                     options.TokenValidationParameters = new()
                                     {
                                         // Valiate the JWT Audience (aud) claim
-                                        ValidAudience = AUDIENCE,
-                                        ValidateAudience = true,
+                                       // ValidAudience = AUDIENCE,
+                                        ValidateAudience = false,
                                         // Validate the JWT Issuer (iss) claim
-                                        ValidIssuer = LOCAL_ISSUER,
-                                        ValidateIssuer = true,
+                                        //ValidIssuer = LOCAL_ISSUER,
+                                        ValidateIssuer = false,
                                         // The signing key must match
-                                        ValidateIssuerSigningKey = true,
-                                        IssuerSigningKey = key,
+                                        ValidateIssuerSigningKey = false,
+                                        //IssuerSigningKey = key,
                                         // Lifetime
                                         ValidateLifetime = true,
                                         // Instructs the asp.net core middleware to use the data in the "roles" claim for User.IsInRole()

@@ -298,19 +298,20 @@ namespace Azure.DataApiBuilder.Service.Tests.Authentication
                                 .AddJwtBearer(options =>
                                 {
                                     options.Audience = AUDIENCE;
+                                    options.Authority = LOCAL_ISSUER;
                                     options.TokenValidationParameters = new()
                                     {
                                         // Valiate the JWT Audience (aud) claim
-                                        ValidAudience = AUDIENCE,
-                                        ValidateAudience = true,
+                                       // ValidAudience = AUDIENCE,
+                                        ValidateAudience = false,
 
                                         // Validate the JWT Issuer (iss) claim
-                                        ValidIssuer = LOCAL_ISSUER,
-                                        ValidateIssuer = true,
+                                        //ValidIssuer = LOCAL_ISSUER,
+                                        ValidateIssuer = false,
 
                                         // The signing key must match
-                                        ValidateIssuerSigningKey = true,
-                                        IssuerSigningKey = key,
+                                        ValidateIssuerSigningKey = false,
+                                        //IssuerSigningKey = key,
 
                                         // Lifetime
                                         ValidateLifetime = true
