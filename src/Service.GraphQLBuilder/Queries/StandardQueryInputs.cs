@@ -198,6 +198,7 @@ namespace Azure.DataApiBuilder.Service.GraphQLBuilder.Queries
                 new StringValueNode("Input type for adding ByteArray filters"),
                 new List<DirectiveNode>(),
                 new List<InputValueDefinitionNode> {
+                    new(null, new NameNode("eq"), new StringValueNode("Equals"), new ByteArrayType().ToTypeNode(), null, new List<DirectiveNode>()),
                     new(null, new NameNode("isNull"), new StringValueNode("Is null test"), new BooleanType().ToTypeNode(), null, new List<DirectiveNode>())
                 }
             );
