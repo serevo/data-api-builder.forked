@@ -51,6 +51,11 @@
         <Watch Remove="dab-config.PostgreSql.json" />
     </ItemGroup>
 
+    <ItemGroup>
+        <Content Include="dab-config.json" Condition="Exists('dab-config.json')">
+            <CopyToOutputDirectory Condition="Exists('dab-config.json')">PreserveNewest</CopyToOutputDirectory>
+        </Content>
+    </ItemGroup>
 
     <ItemGroup>
         <PackageReference Include="Azure.Identity" />
