@@ -42,19 +42,17 @@
         </Content>
     </ItemGroup>
 
-
     <ItemGroup>
-        <Watch Remove="dab-config.CosmosDb_NoSql.json" />
-        <Watch Remove="dab-config.json" />
-        <Watch Remove="dab-config.MsSql.json" />
-        <Watch Remove="dab-config.MySql.json" />
-        <Watch Remove="dab-config.PostgreSql.json" />
+        <Watch Include="dab-config.json" Condition="Exists('dab-config.json')">
+            <CopyToOutputDirectory Condition="Exists('dab-config.json')">PreserveNewest</CopyToOutputDirectory>
+        </Watch>
     </ItemGroup>
 
     <ItemGroup>
-        <Content Include="dab-config.json" Condition="Exists('dab-config.json')">
-            <CopyToOutputDirectory Condition="Exists('dab-config.json')">PreserveNewest</CopyToOutputDirectory>
-        </Content>
+        <Watch Remove="dab-config.CosmosDb_NoSql.json" />
+        <Watch Remove="dab-config.MsSql.json" />
+        <Watch Remove="dab-config.MySql.json" />
+        <Watch Remove="dab-config.PostgreSql.json" />
     </ItemGroup>
 
     <ItemGroup>
