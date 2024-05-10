@@ -262,13 +262,10 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             );
 
             RuntimeConfigValidator configValidator = InitializeRuntimeConfigValidator();
-            Mock<ISqlMetadataProvider> _sqlMetadataProvider = new();
-            Mock<IMetadataProviderFactory> _metadataProviderFactory = new();
-            _metadataProviderFactory.Setup(x => x.GetMetadataProvider(It.IsAny<string>())).Returns(_sqlMetadataProvider.Object);
 
             // Assert that expected exception is thrown. Entity used in relationship is Invalid
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationshipConfigCorrectness(runtimeConfig));
             Assert.AreEqual($"Entity: {sampleRelationship.TargetEntity} used for relationship is not defined in the config.", ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
         }
@@ -325,13 +322,10 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             );
 
             RuntimeConfigValidator configValidator = InitializeRuntimeConfigValidator();
-            Mock<ISqlMetadataProvider> _sqlMetadataProvider = new();
-            Mock<IMetadataProviderFactory> _metadataProviderFactory = new();
-            _metadataProviderFactory.Setup(x => x.GetMetadataProvider(It.IsAny<string>())).Returns(_sqlMetadataProvider.Object);
 
             // Exception should be thrown as we cannot use an entity (with graphQL disabled) in a relationship.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationshipConfigCorrectness(runtimeConfig));
             Assert.AreEqual($"Entity: {sampleRelationship.TargetEntity} is disabled for GraphQL.", ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
         }
@@ -417,7 +411,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             // Exception thrown as foreignKeyPair not found in the DB.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationships(runtimeConfig, _metadataProviderFactory.Object));
             Assert.AreEqual($"Could not find relationship between Linking Object: TEST_SOURCE_LINK"
                 + $" and entity: {relationshipEntity}.", ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
@@ -435,7 +429,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             // Since, we have defined the relationship in Database,
             // the engine was able to find foreign key relation and validation will pass.
-            configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object);
+            configValidator.ValidateRelationships(runtimeConfig, _metadataProviderFactory.Object);
         }
 
         /// <summary>
@@ -498,7 +492,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             // Exception is thrown as foreignKey pair is not specified in the config, nor defined
             // in the database.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationships(runtimeConfig, _metadataProviderFactory.Object));
             Assert.AreEqual($"Could not find relationship between entities:"
                 + $" SampleEntity1 and SampleEntity2.", ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
@@ -518,7 +512,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             // No Exception is thrown as foreignKey Pair was found in the DB between
             // source and target entity.
-            configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object);
+            configValidator.ValidateRelationships(runtimeConfig, _metadataProviderFactory.Object);
         }
 
         /// <summary>
@@ -566,7 +560,6 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             FileSystemRuntimeConfigLoader loader = new(fileSystem);
             RuntimeConfigProvider provider = new(loader) { IsLateConfigured = true };
             RuntimeConfigValidator configValidator = new(provider, fileSystem, new Mock<ILogger<RuntimeConfigValidator>>().Object);
-            Mock<ISqlMetadataProvider> _sqlMetadataProvider = new();
 
             Dictionary<string, DatabaseObject> mockDictionaryForEntityDatabaseObject = new()
             {
@@ -581,16 +574,10 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 }
             };
 
-            _sqlMetadataProvider.Setup<Dictionary<string, DatabaseObject>>(x =>
-                x.EntityToDatabaseObject).Returns(mockDictionaryForEntityDatabaseObject);
-
-            Mock<IMetadataProviderFactory> _metadataProviderFactory = new();
-            _metadataProviderFactory.Setup(x => x.GetMetadataProvider(It.IsAny<string>())).Returns(_sqlMetadataProvider.Object);
-
             // Exception is thrown since sourceFields and targetFields do not match in either their existence,
             // or their length.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationshipConfigCorrectness(runtimeConfig));
             Assert.AreEqual(expectedExceptionMessage, ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
             Assert.AreEqual(DataApiBuilderException.SubStatusCodes.ConfigValidationError, ex.SubStatusCode);
@@ -672,7 +659,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             // Exception is thrown since either source or target field does not exist as a valid backing column in their respective entity.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationships(runtimeConfig, _metadataProviderFactory.Object));
             Assert.AreEqual(expectedExceptionMessage, ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
             Assert.AreEqual(DataApiBuilderException.SubStatusCodes.ConfigValidationError, ex.SubStatusCode);
@@ -776,7 +763,6 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             FileSystemRuntimeConfigLoader loader = new(fileSystem);
             RuntimeConfigProvider provider = new(loader) { IsLateConfigured = true };
             RuntimeConfigValidator configValidator = new(provider, fileSystem, new Mock<ILogger<RuntimeConfigValidator>>().Object);
-            Mock<ISqlMetadataProvider> _sqlMetadataProvider = new();
 
             Dictionary<string, DatabaseObject> mockDictionaryForEntityDatabaseObject = new()
             {
@@ -791,19 +777,10 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 }
             };
 
-            _sqlMetadataProvider.Setup<Dictionary<string, DatabaseObject>>(x =>
-                x.EntityToDatabaseObject).Returns(mockDictionaryForEntityDatabaseObject);
-
-            string discard;
-            _sqlMetadataProvider.Setup(x => x.TryGetExposedColumnName(It.IsAny<string>(), It.IsAny<string>(), out discard)).Returns(true);
-
-            Mock<IMetadataProviderFactory> _metadataProviderFactory = new();
-            _metadataProviderFactory.Setup(x => x.GetMetadataProvider(It.IsAny<string>())).Returns(_sqlMetadataProvider.Object);
-
             // Exception is thrown since linkingSourceFields and linkingTargetFields do not match in either their existence,
             // or their length.
             DataApiBuilderException ex = Assert.ThrowsException<DataApiBuilderException>(() =>
-                configValidator.ValidateRelationshipsInConfig(runtimeConfig, _metadataProviderFactory.Object));
+                configValidator.ValidateRelationshipConfigCorrectness(runtimeConfig));
             Assert.AreEqual(expectedExceptionMessage, ex.Message);
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, ex.StatusCode);
             Assert.AreEqual(DataApiBuilderException.SubStatusCodes.ConfigValidationError, ex.SubStatusCode);
@@ -1141,7 +1118,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// }
         /// </summary>
         [TestMethod]
-        public void ValidateEntitiesWithGraphQLExposedGenerateDuplicateQueries()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateEntitiesWithGraphQLExposedGenerateDuplicateQueries(DatabaseType databaseType)
         {
             // Entity Name: Book
             // pk_query: book_by_pk
@@ -1158,7 +1137,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 { "book", book },
                 { "Book", bookWithUpperCase }
             };
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "Book");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "Book", databaseType);
         }
 
         /// <summary>
@@ -1181,7 +1160,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// }
         /// </summary>
         [TestMethod]
-        public void ValidateStoredProcedureAndTableGeneratedDuplicateQueries()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateStoredProcedureAndTableGeneratedDuplicateQueries(DatabaseType databaseType)
         {
             // Entity Name: ExecuteBook
             // Entity Type: table
@@ -1199,7 +1180,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 { "executeBook", bookTable },
                 { "Book_by_pk", bookByPkStoredProcedure }
             };
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "executeBook");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "executeBook", databaseType);
         }
 
         /// <summary>
@@ -1224,7 +1205,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// }
         /// </summary>
         [TestMethod]
-        public void ValidateStoredProcedureAndTableGeneratedDuplicateMutation()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateStoredProcedureAndTableGeneratedDuplicateMutation(DatabaseType databaseType)
         {
             // Entity Name: Book
             // Entity Type: table
@@ -1241,7 +1224,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 { "ExecuteBooks", bookTable },
                 { "AddBook", addBookStoredProcedure }
             };
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "ExecuteBooks");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "ExecuteBooks", databaseType);
         }
 
         /// <summary>
@@ -1260,7 +1243,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         ///  }
         /// </summary>
         [TestMethod]
-        public void ValidateEntitiesWithNameCollisionInGraphQLTypeGenerateDuplicateQueriesCase()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateEntitiesWithNameCollisionInGraphQLTypeGenerateDuplicateQueriesCase(DatabaseType databaseType)
         {
             // Entity Name: book
             // pk_query: book_by_pk
@@ -1277,7 +1262,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 { "book", book },
                 { "book_alt", book_alt }
             };
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt", databaseType);
         }
 
         /// <summary>
@@ -1301,7 +1286,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         ///  }
         /// </summary>
         [TestMethod]
-        public void ValidateEntitiesWithCollisionsInSingularPluralNamesGenerateDuplicateQueries()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateEntitiesWithCollisionsInSingularPluralNamesGenerateDuplicateQueries(DatabaseType databaseType)
         {
             // Entity Name: book
             // pk_query: book_by_pk
@@ -1318,7 +1305,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 { "book", book },
                 { "book_alt", book_alt }
             };
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt", databaseType);
         }
 
         /// <summary>
@@ -1338,7 +1325,9 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// }
         /// </summary>
         [TestMethod]
-        public void ValidateEntitiesWithNameCollisionInSingularPluralTypeGeneratesDuplicateQueries()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateEntitiesWithNameCollisionInSingularPluralTypeGeneratesDuplicateQueries(DatabaseType databaseType)
         {
             SortedDictionary<string, Entity> entityCollection = new();
 
@@ -1354,7 +1343,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             entityCollection.Add("book_alt", book_alt);
             entityCollection.Add("book", book);
-            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt");
+            ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(entityCollection, "book_alt", databaseType);
         }
 
         /// <summary>
@@ -1398,9 +1387,10 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         ///  }
         /// </summary>
         [TestMethod]
-        public void ValidateValidEntityDefinitionsDoesNotGenerateDuplicateQueries()
+        [DataRow(DatabaseType.MySQL)] // Relational Database
+        [DataRow(DatabaseType.CosmosDB_NoSQL)] // Non Relational Database
+        public void ValidateValidEntityDefinitionsDoesNotGenerateDuplicateQueries(DatabaseType databaseType)
         {
-
             // Entity Name: Book
             // GraphQL is not exposed for this entity
             Entity bookWithUpperCase = GraphQLTestHelpers.GenerateEmptyEntity() with { GraphQL = new("", "", false) };
@@ -1441,7 +1431,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             };
 
             RuntimeConfigValidator configValidator = InitializeRuntimeConfigValidator();
-            configValidator.ValidateEntitiesDoNotGenerateDuplicateQueriesOrMutation(new(entityCollection));
+            configValidator.ValidateEntitiesDoNotGenerateDuplicateQueriesOrMutation(databaseType, new(entityCollection));
         }
 
         /// <summary>
@@ -1495,11 +1485,11 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// </summary>
         /// <param name="entityCollection">Entity definitions</param>
         /// <param name="entityName">Entity name to construct the expected exception message</param>
-        private static void ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(SortedDictionary<string, Entity> entityCollection, string entityName)
+        private static void ValidateExceptionForDuplicateQueriesDueToEntityDefinitions(SortedDictionary<string, Entity> entityCollection, string entityName, DatabaseType databaseType)
         {
             RuntimeConfigValidator configValidator = InitializeRuntimeConfigValidator();
             DataApiBuilderException dabException = Assert.ThrowsException<DataApiBuilderException>(
-               action: () => configValidator.ValidateEntitiesDoNotGenerateDuplicateQueriesOrMutation(new(entityCollection)));
+               action: () => configValidator.ValidateEntitiesDoNotGenerateDuplicateQueriesOrMutation(databaseType, new(entityCollection)));
 
             Assert.AreEqual(expected: $"Entity {entityName} generates queries/mutation that already exist", actual: dabException.Message);
             Assert.AreEqual(expected: HttpStatusCode.ServiceUnavailable, actual: dabException.StatusCode);
