@@ -51,10 +51,9 @@ public class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptions
         options.Authority = newAuthOptions.Jwt.Issuer;
         options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters()
         {
-            //ValidAudience = newAuthOptions.Jwt.Audience,
-            //ValidIssuer = newAuthOptions.Jwt.Issuer,
-            ValidateIssuer = false,
-            ValidateLifetime = true,
+            ValidAudience = newAuthOptions.Jwt.Audience,
+            ValidIssuer = newAuthOptions.Jwt.Issuer,
+            ValidateIssuer = bool.TryParse(newAuthOptions.Jwt.ValidateIssuer, out bool b) && b,
             // Instructs the asp.net core middleware to use the data in the "roles" claim for User.IsInRole()
             // See https://learn.microsoft.com/en-us/dotnet/api/system.security.claims.claimsprincipal.isinrole#remarks
             // This should eventually be configurable to address #2395
