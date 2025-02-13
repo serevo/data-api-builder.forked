@@ -53,7 +53,7 @@ public class ConfigureJwtBearerOptions : IConfigureNamedOptions<JwtBearerOptions
         {
             ValidAudience = newAuthOptions.Jwt.Audience,
             ValidIssuer = newAuthOptions.Jwt.Issuer,
-            ValidateIssuer = bool.TryParse(newAuthOptions.Jwt.ValidateIssuer, out bool b) && b,
+            ValidateIssuer = !bool.TryParse(newAuthOptions.Jwt.ValidateIssuer, out bool b) || b,
             // Instructs the asp.net core middleware to use the data in the "roles" claim for User.IsInRole()
             // See https://learn.microsoft.com/en-us/dotnet/api/system.security.claims.claimsprincipal.isinrole#remarks
             // This should eventually be configurable to address #2395

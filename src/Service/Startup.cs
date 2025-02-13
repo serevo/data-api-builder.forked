@@ -552,7 +552,7 @@ namespace Azure.DataApiBuilder.Service
                         options.Authority = authOptions.Jwt!.Issuer;
                         options.TokenValidationParameters = new Microsoft.IdentityModel.Tokens.TokenValidationParameters()
                         {
-                            ValidateIssuer = bool.TryParse(authOptions.Jwt!.ValidateIssuer, out bool b) && b,
+                            ValidateIssuer = !bool.TryParse(authOptions.Jwt!.ValidateIssuer, out bool b) || b,
 
                             // Instructs the asp.net core middleware to use the data in the "roles" claim for User.IsInRole()
                             // See https://learn.microsoft.com/en-us/dotnet/api/system.security.claims.claimsprincipal.isinrole#remarks
