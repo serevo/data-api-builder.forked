@@ -20,6 +20,7 @@ using System.Threading.Tasks;
 using System.Web;
 using Azure.DataApiBuilder.Config;
 using Azure.DataApiBuilder.Config.ObjectModel;
+using Azure.DataApiBuilder.Core;
 using Azure.DataApiBuilder.Core.AuthenticationHelpers;
 using Azure.DataApiBuilder.Core.Authorization;
 using Azure.DataApiBuilder.Core.Configurations;
@@ -469,6 +470,11 @@ type Moon {
         [TestCleanup]
         public void CleanupAfterEachTest()
         {
+            if (File.Exists(CUSTOM_CONFIG_FILENAME))
+            {
+                File.Delete(CUSTOM_CONFIG_FILENAME);
+            }
+
             TestHelper.UnsetAllDABEnvironmentVariables();
         }
 
@@ -941,7 +947,7 @@ type Moon {
             string swaTokenPayload = AuthTestHelper.CreateStaticWebAppsEasyAuthToken(
                 addAuthenticated: true,
                 specificRole: POST_STARTUP_CONFIG_ROLE);
-            message.Headers.Add(AuthenticationOptions.CLIENT_PRINCIPAL_HEADER, swaTokenPayload);
+            message.Headers.Add(Config.ObjectModel.AuthenticationOptions.CLIENT_PRINCIPAL_HEADER, swaTokenPayload);
             message.Headers.Add(AuthorizationResolver.CLIENT_ROLE_HEADER, POST_STARTUP_CONFIG_ROLE);
             HttpResponseMessage authorizedResponse = await httpClient.SendAsync(message);
             Assert.AreEqual(expected: HttpStatusCode.OK, actual: authorizedResponse.StatusCode);
@@ -1388,7 +1394,7 @@ type Moon {
 
             configValidator.ValidateRelationshipConfigCorrectness(configProvider.GetConfig());
             await configValidator.ValidateEntitiesMetadata(configProvider.GetConfig(), mockLoggerFactory);
-            Assert.IsTrue(configValidator.ConfigValidationExceptions.IsNullOrEmpty());
+            Assert.IsTrue(EnumerableUtilities.IsNullOrEmpty(configValidator.ConfigValidationExceptions));
         }
 
         /// <summary>
@@ -1573,7 +1579,7 @@ type Moon {
 
             JsonSchemaValidationResult result = await jsonSchemaValidator.ValidateJsonConfigWithSchemaAsync(jsonSchema, jsonData);
             Assert.IsTrue(result.IsValid);
-            Assert.IsTrue(result.ValidationErrors.IsNullOrEmpty());
+            Assert.IsTrue(EnumerableUtilities.IsNullOrEmpty(result.ValidationErrors));
             schemaValidatorLogger.Verify(
                 x => x.Log(
                     LogLevel.Information,
@@ -1827,7 +1833,10 @@ type Moon {
 
         /// <summary>
         /// Test different graphql endpoints in different host modes
-        /// when accessed interactively via browser.
+        /// when accessed interactively via browser. Note that the
+        /// branding for "Banana Cake Pop" has changed to "Nitro", and
+        /// we have updated the graphql endpoint test for dev mode to reflect
+        /// this change, but it may need to be updated again in the future.
         /// </summary>
         /// <param name="endpoint">The endpoint route</param>
         /// <param name="hostMode">The mode in which the service is executing.</param>
@@ -1835,7 +1844,7 @@ type Moon {
         /// <param name="expectedContent">The expected phrase in the response body.</param>
         [DataTestMethod]
         [TestCategory(TestCategory.MSSQL)]
-        [DataRow("/graphql/", HostMode.Development, HttpStatusCode.OK, "Banana Cake Pop",
+        [DataRow("/graphql/", HostMode.Development, HttpStatusCode.OK, "Nitro",
             DisplayName = "GraphQL endpoint with no query in development mode.")]
         [DataRow("/graphql", HostMode.Production, HttpStatusCode.NotFound,
             DisplayName = "GraphQL endpoint with no query in production mode.")]
@@ -2260,7 +2269,7 @@ type Moon {
             string[] args = new[]
             {
                 $"--ConfigFileName={CUSTOM_CONFIG}"
-        };
+            };
 
             // Non-Hosted Scenario
             using (TestServer server = new(Program.CreateWebHostBuilder(args)))
@@ -2892,8 +2901,8 @@ type Moon {
 
             const string CUSTOM_CONFIG = "custom-config.json";
 
-            AuthenticationOptions AuthenticationOptions = new(Provider: EasyAuthType.StaticWebApps.ToString(), null);
-            HostOptions staticWebAppsHostOptions = new(null, AuthenticationOptions);
+            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: EasyAuthType.StaticWebApps.ToString(), null);
+            HostOptions staticWebAppsHostOptions = new(null, authenticationOptions);
 
             RuntimeOptions runtimeOptions = configuration.Runtime;
             RuntimeOptions baseRouteEnabledRuntimeOptions = new(runtimeOptions?.Rest, runtimeOptions?.GraphQL, staticWebAppsHostOptions, "/data-api");
@@ -3219,11 +3228,11 @@ type Planet @model(name:""PlanetAlias"") {
             RuntimeConfig config = configProvider.GetConfig();
 
             // Setup configuration
-            AuthenticationOptions AuthenticationOptions = new(Provider: authType.ToString(), null);
+            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: authType.ToString(), Jwt: null);
             RuntimeOptions runtimeOptions = new(
                 Rest: new(),
                 GraphQL: new(),
-                Host: new(null, AuthenticationOptions, hostMode)
+                Host: new(Cors: null, authenticationOptions, hostMode)
             );
             RuntimeConfig configWithCustomHostMode = config with { Runtime = runtimeOptions };
 
@@ -3471,7 +3480,7 @@ type Planet @model(name:""PlanetAlias"") {
             string configWithCustomLogLevelJson = configWithCustomLogLevel.ToJson();
             Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomLogLevelJson, out RuntimeConfig deserializedRuntimeConfig));
 
-            Assert.AreEqual(expectedLevel, deserializedRuntimeConfig.Runtime.LoggerLevel.Value);
+            Assert.AreEqual(expectedLevel, deserializedRuntimeConfig.Runtime.Telemetry.LoggerLevel.Value);
         }
 
         /// <summary>
@@ -3519,10 +3528,11 @@ type Planet @model(name:""PlanetAlias"") {
             using (JsonDocument parsedDocument = JsonDocument.Parse(serializedConfig))
             {
                 JsonElement root = parsedDocument.RootElement;
+                JsonElement runtimeElement = root.GetProperty("runtime");
 
                 //Validate log-level property exists in runtime
-                JsonElement runtimeElement = root.GetProperty("runtime");
-                bool logLevelPropertyExists = runtimeElement.TryGetProperty("log-level", out JsonElement logLevelElement);
+                JsonElement telemetryElement = runtimeElement.GetProperty("telemetry");
+                bool logLevelPropertyExists = telemetryElement.TryGetProperty("log-level", out JsonElement logLevelElement);
                 Assert.AreEqual(expected: true, actual: logLevelPropertyExists);
 
                 //Validate level property inside log-level is of expected value
@@ -3550,7 +3560,7 @@ type Planet @model(name:""PlanetAlias"") {
                     Rest: new(),
                     GraphQL: new(),
                     Host: new(null, null),
-                    LoggerLevel: logLevelOptions
+                    Telemetry: new(LoggerLevel: logLevelOptions)
                 ),
                 Entities: baseConfig.Entities
             );
@@ -4149,6 +4159,7 @@ type Planet @model(name:""PlanetAlias"") {
         private static void CreateCustomConfigFile(bool globalRestEnabled, Dictionary<string, Entity> entityMap)
         {
             DataSource dataSource = new(DatabaseType.MSSQL, GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL), Options: null);
+            HostOptions hostOptions = new(Cors: null, Authentication: new() { Provider = nameof(EasyAuthType.StaticWebApps) });
 
             RuntimeConfig runtimeConfig = new(
                 Schema: string.Empty,
@@ -4156,7 +4167,7 @@ type Planet @model(name:""PlanetAlias"") {
                 Runtime: new(
                     Rest: new(Enabled: globalRestEnabled),
                     GraphQL: new(),
-                    Host: new(null, null)
+                    Host: hostOptions
                 ),
                 Entities: new(entityMap));
 
@@ -4468,7 +4479,6 @@ type Planet @model(name:""PlanetAlias"") {
         /// <summary>
         /// Helper  method to instantiate RuntimeConfig object needed for multiple create tests.
         /// </summary>
-        /// <returns></returns>
         public static RuntimeConfig InitialzieRuntimeConfigForMultipleCreateTests(bool isMultipleCreateOperationEnabled)
         {
             // Multiple create operations are enabled.
@@ -4530,9 +4540,11 @@ type Planet @model(name:""PlanetAlias"") {
 
             entityMap.Add("Publisher", publisherEntity);
 
+            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: nameof(EasyAuthType.StaticWebApps), null);
+
             RuntimeConfig runtimeConfig = new(Schema: "IntegrationTestMinimalSchema",
                                               DataSource: dataSource,
-                                              Runtime: new(restRuntimeOptions, graphqlOptions, Host: new(Cors: null, Authentication: null, Mode: HostMode.Development), Cache: null),
+                                              Runtime: new(restRuntimeOptions, graphqlOptions, Host: new(Cors: null, Authentication: authenticationOptions, Mode: HostMode.Development), Cache: null),
                                               Entities: new(entityMap));
             return runtimeConfig;
         }
@@ -4541,7 +4553,6 @@ type Planet @model(name:""PlanetAlias"") {
         /// Instantiate minimal runtime config with custom global settings.
         /// </summary>
         /// <param name="dataSource">DataSource to pull connection string required for engine start.</param>
-        /// <returns></returns>
         public static RuntimeConfig InitMinimalRuntimeConfig(
             DataSource dataSource,
             GraphQLRuntimeOptions graphqlOptions,
@@ -4578,11 +4589,13 @@ type Planet @model(name:""PlanetAlias"") {
                 );
             entityMap.Add("Publisher", anotherEntity);
 
+            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: nameof(EasyAuthType.StaticWebApps), null);
+
             return new(
                 Schema: "IntegrationTestMinimalSchema",
                 DataSource: dataSource,
                 Runtime: new(restOptions, graphqlOptions,
-                    Host: new(Cors: null, Authentication: null, Mode: HostMode.Development), Cache: cacheOptions),
+                    Host: new(Cors: null, Authentication: authenticationOptions, Mode: HostMode.Development), Cache: cacheOptions),
                 Entities: new(entityMap)
             );
         }
@@ -4643,7 +4656,6 @@ type Planet @model(name:""PlanetAlias"") {
         /// <summary>
         /// Create basic runtime config with given DatabaseType and connectionString with no entity.
         /// </summary>
-        /// <returns></returns>
         private static RuntimeConfig CreateBasicRuntimeConfigWithNoEntity(
             DatabaseType dbType = DatabaseType.MSSQL,
             string connectionString = "")

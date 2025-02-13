@@ -135,6 +135,15 @@ public record RuntimeConfig
     [JsonIgnore]
     public string DefaultDataSourceName { get; set; }
 
+    /// <summary>
+    /// Retrieves the value of runtime.graphql.aggregation.enabled property if present, default is true.
+    /// </summary>
+    [JsonIgnore]
+    public bool EnableAggregation =>
+        Runtime is not null &&
+        Runtime.GraphQL is not null &&
+        Runtime.GraphQL.EnableAggregation;
+
     private Dictionary<string, DataSource> _dataSourceNameToDataSource;
 
     private Dictionary<string, string> _entityNameToDataSourceName = new();
@@ -178,7 +187,12 @@ public record RuntimeConfig
     /// <param name="Runtime">Runtime settings.</param>
     /// <param name="DataSourceFiles">List of datasource files for multiple db scenario. Null for single db scenario.</param>
     [JsonConstructor]
-    public RuntimeConfig(string? Schema, DataSource DataSource, RuntimeEntities Entities, RuntimeOptions? Runtime = null, DataSourceFiles? DataSourceFiles = null)
+    public RuntimeConfig(
+        string? Schema,
+        DataSource DataSource,
+        RuntimeEntities Entities,
+        RuntimeOptions? Runtime = null,
+        DataSourceFiles? DataSourceFiles = null)
     {
         this.Schema = Schema ?? DEFAULT_CONFIG_SCHEMA_LINK;
         this.DataSource = DataSource;
@@ -186,16 +200,32 @@ public record RuntimeConfig
         this.Entities = Entities;
         this.DefaultDataSourceName = Guid.NewGuid().ToString();
 
+        if (this.DataSource is null)
+        {
+            throw new DataApiBuilderException(
+                message: "data-source is a mandatory property in DAB Config",
+                statusCode: HttpStatusCode.UnprocessableEntity,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError);
+        }
+
         // we will set them up with default values
         _dataSourceNameToDataSource = new Dictionary<string, DataSource>
         {
-            { DefaultDataSourceName, this.DataSource }
+            { this.DefaultDataSourceName, this.DataSource }
         };
 
         _entityNameToDataSourceName = new Dictionary<string, string>();
+        if (Entities is null)
+        {
+            throw new DataApiBuilderException(
+                message: "entities is a mandatory property in DAB Config",
+                statusCode: HttpStatusCode.UnprocessableEntity,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError);
+        }
+
         foreach (KeyValuePair<string, Entity> entity in Entities)
         {
-            _entityNameToDataSourceName.TryAdd(entity.Key, DefaultDataSourceName);
+            _entityNameToDataSourceName.TryAdd(entity.Key, this.DefaultDataSourceName);
         }
 
         // Process data source and entities information for each database in multiple database scenario.
@@ -206,7 +236,8 @@ public record RuntimeConfig
             IEnumerable<KeyValuePair<string, Entity>> allEntities = Entities.AsEnumerable();
             // Iterate through all the datasource files and load the config.
             IFileSystem fileSystem = new FileSystem();
-            FileSystemRuntimeConfigLoader loader = new(fileSystem);
+            // This loader is not used as a part of hot reload and therefore does not need a handler.
+            FileSystemRuntimeConfigLoader loader = new(fileSystem, handler: null);
 
             foreach (string dataSourceFile in DataSourceFiles.SourceFiles)
             {
@@ -543,8 +574,9 @@ public record RuntimeConfig
     /// </summary>
     public bool IsLogLevelNull() =>
         Runtime is null ||
-        Runtime.LoggerLevel is null ||
-        Runtime.LoggerLevel.Value is null;
+        Runtime.Telemetry is null ||
+        Runtime.Telemetry.LoggerLevel is null ||
+        Runtime.Telemetry.LoggerLevel.Value is null;
 
     /// <summary>
     /// Takes in the RuntimeConfig object and checks the LogLevel.
@@ -555,7 +587,7 @@ public record RuntimeConfig
     /// </summary>
     public static LogLevel GetConfiguredLogLevel(RuntimeConfig runtimeConfig)
     {
-        LogLevel? value = runtimeConfig.Runtime?.LoggerLevel?.Value;
+        LogLevel? value = runtimeConfig.Runtime?.Telemetry?.LoggerLevel?.Value;
         if (value is not null)
         {
             return (LogLevel)value;
