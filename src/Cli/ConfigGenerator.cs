@@ -265,7 +265,7 @@ namespace Cli
                         Cors: new(options.CorsOrigin?.ToArray() ?? Array.Empty<string>()),
                         Authentication: new(
                             Provider: options.AuthenticationProvider,
-                            Jwt: (options.Audience is null && options.Issuer is null) ? null : new(options.Audience, options.Issuer)),
+                            Jwt: (options.Audience is null && options.Issuer is null && options.ValidateIssuer is null) ? null : new(options.Audience, options.Issuer, options.ValidateIssuer)),
                         Mode: options.HostMode),
                     BaseRoute: runtimeBaseRoute
                 ),
@@ -750,13 +750,14 @@ namespace Cli
                 }
             }
 
-            // Host: Mode, Cors.Origins, Cors.AllowCredentials, Authentication.Provider, Authentication.Jwt.Audience, Authentication.Jwt.Issuer
+            // Host: Mode, Cors.Origins, Cors.AllowCredentials, Authentication.Provider, Authentication.Jwt.Audience, Authentication.Jwt.Issuer, Authentication.Jwt.ValidateIssuer
             if (options.RuntimeHostMode != null ||
                 options.RuntimeHostCorsOrigins != null ||
                 options.RuntimeHostCorsAllowCredentials != null ||
                 options.RuntimeHostAuthenticationProvider != null ||
                 options.RuntimeHostAuthenticationJwtAudience != null ||
-                options.RuntimeHostAuthenticationJwtIssuer != null)
+                options.RuntimeHostAuthenticationJwtIssuer != null ||
+                options.RuntimeHostAuthenticationJwtValidateIssuer != null)
             {
                 HostOptions? updatedHostOptions = runtimeConfig?.Runtime?.Host;
                 bool status = TryUpdateConfiguredHostValues(options, ref updatedHostOptions);
@@ -1030,7 +1031,7 @@ namespace Cli
                     AuthenticationOptions AuthOptions;
                     if (updatedHostOptions?.Authentication == null || updatedHostOptions.Authentication?.Jwt == null)
                     {
-                        jwtOptions = new(Audience: (string)updatedValue, null);
+                        jwtOptions = new(Audience: (string)updatedValue, null, null);
                     }
                     else
                     {
@@ -1058,7 +1059,7 @@ namespace Cli
                     AuthenticationOptions AuthOptions;
                     if (updatedHostOptions?.Authentication == null || updatedHostOptions.Authentication?.Jwt == null)
                     {
-                        jwtOptions = new(null, Issuer: (string)updatedValue);
+                        jwtOptions = new(null, Issuer: (string)updatedValue, null);
                     }
                     else
                     {
@@ -1076,6 +1077,34 @@ namespace Cli
 
                     updatedHostOptions = updatedHostOptions! with { Authentication = AuthOptions };
                     _logger.LogInformation("Updated RuntimeConfig with Runtime.Host.Authentication.Jwt.Issuer as '{updatedValue}'", updatedValue);
+                }
+
+                // Runtime.Host.Authentication.Jwt.ValidateIssuer
+                updatedValue = options?.RuntimeHostAuthenticationJwtValidateIssuer;
+                if (updatedValue != null)
+                {
+                    JwtOptions jwtOptions;
+                    AuthenticationOptions AuthOptions;
+                    if (updatedHostOptions?.Authentication == null || updatedHostOptions.Authentication?.Jwt == null)
+                    {
+                        jwtOptions = new(null, null, ValidateIssuer: (string)updatedValue);
+                    }
+                    else
+                    {
+                        jwtOptions = updatedHostOptions.Authentication.Jwt with { ValidateIssuer = (string)updatedValue };
+                    }
+
+                    if (updatedHostOptions?.Authentication == null)
+                    {
+                        AuthOptions = new(Jwt: jwtOptions);
+                    }
+                    else
+                    {
+                        AuthOptions = updatedHostOptions.Authentication with { Jwt = jwtOptions };
+                    }
+
+                    updatedHostOptions = updatedHostOptions! with { Authentication = AuthOptions };
+                    _logger.LogInformation("Updated RuntimeConfig with Runtime.Host.Authentication.Jwt.ValidateIssuer as '{updatedValue}'", updatedValue);
                 }
 
                 return true;

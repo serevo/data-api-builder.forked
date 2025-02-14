@@ -463,7 +463,7 @@ public class EndToEndTests
     public void TestVerifyAuthenticationOptions()
     {
         string[] initArgs = { "init", "-c", TEST_RUNTIME_CONFIG_FILE, "--database-type", "mssql",
-            "--auth.provider", "AzureAD", "--auth.audience", "aud-xxx", "--auth.issuer", "issuer-xxx" };
+            "--auth.provider", "AzureAD", "--auth.audience", "aud-xxx", "--auth.issuer", "issuer-xxx", "--auth.validateissuer", "validateissuer-xxx" };
         Program.Execute(initArgs, _cliLogger!, _fileSystem!, _runtimeConfigLoader!);
 
         Assert.IsTrue(_runtimeConfigLoader!.TryLoadConfig(TEST_RUNTIME_CONFIG_FILE, out RuntimeConfig? runtimeConfig));
@@ -474,6 +474,7 @@ public class EndToEndTests
         Assert.AreEqual("AzureAD", runtimeConfig.Runtime.Host.Authentication?.Provider);
         Assert.AreEqual("aud-xxx", runtimeConfig.Runtime.Host.Authentication?.Jwt?.Audience);
         Assert.AreEqual("issuer-xxx", runtimeConfig.Runtime.Host.Authentication?.Jwt?.Issuer);
+        Assert.AreEqual("validateissuer-xxx", runtimeConfig.Runtime.Host.Authentication?.Jwt?.ValidateIssuer);
     }
 
     /// <summary>

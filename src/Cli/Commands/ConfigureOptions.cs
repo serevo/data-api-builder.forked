@@ -42,6 +42,7 @@ namespace Cli.Commands
             string? runtimeHostAuthenticationProvider = null,
             string? runtimeHostAuthenticationJwtAudience = null,
             string? runtimeHostAuthenticationJwtIssuer = null,
+            string? runtimeHostAuthenticationJwtValidateIssuer = null,
             string? config = null)
             : base(config)
         {
@@ -72,6 +73,7 @@ namespace Cli.Commands
             RuntimeHostAuthenticationProvider = runtimeHostAuthenticationProvider;
             RuntimeHostAuthenticationJwtAudience = runtimeHostAuthenticationJwtAudience;
             RuntimeHostAuthenticationJwtIssuer = runtimeHostAuthenticationJwtIssuer;
+            RuntimeHostAuthenticationJwtValidateIssuer = runtimeHostAuthenticationJwtValidateIssuer;
         }
 
         [Option("data-source.database-type", Required = false, HelpText = "Database type. Allowed values: MSSQL, PostgreSQL, CosmosDB_NoSQL, MySQL.")]
@@ -139,6 +141,9 @@ namespace Cli.Commands
 
         [Option("runtime.host.authentication.jwt.issuer", Required = false, HelpText = "Configure the entity that issued the Jwt Token.")]
         public string? RuntimeHostAuthenticationJwtIssuer { get; }
+
+        [Option("runtime.host.authentication.jwt.validateissuer", Required = false, HelpText = "Configure the entity that validate issued the Jwt Token.")]
+        public string? RuntimeHostAuthenticationJwtValidateIssuer { get; }
 
         public int Handler(ILogger logger, FileSystemRuntimeConfigLoader loader, IFileSystem fileSystem)
         {

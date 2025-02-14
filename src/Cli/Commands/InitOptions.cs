@@ -30,6 +30,7 @@ namespace Cli.Commands
             string authenticationProvider,
             string? audience = null,
             string? issuer = null,
+            string? validateIssuer = null,
             string restPath = RestRuntimeOptions.DEFAULT_PATH,
             string? runtimeBaseRoute = null,
             bool restDisabled = false,
@@ -53,6 +54,7 @@ namespace Cli.Commands
             AuthenticationProvider = authenticationProvider;
             Audience = audience;
             Issuer = issuer;
+            ValidateIssuer = validateIssuer;
             RestPath = restPath;
             RuntimeBaseRoute = runtimeBaseRoute;
             RestDisabled = restDisabled;
@@ -96,6 +98,9 @@ namespace Cli.Commands
 
         [Option("auth.issuer", Required = false, HelpText = "Specify the party that issued the jwt token.")]
         public string? Issuer { get; }
+
+        [Option("auth.validateissuer", Required = false, HelpText = "Specify the party that validate issued the jwt token.")]
+        public string? ValidateIssuer { get; }
 
         [Option("rest.path", Default = RestRuntimeOptions.DEFAULT_PATH, Required = false, HelpText = "Specify the REST endpoint's default prefix.")]
         public string RestPath { get; }

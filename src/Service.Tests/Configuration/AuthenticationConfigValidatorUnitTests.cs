@@ -64,7 +64,8 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
         {
             JwtOptions jwt = new(
                 Audience: "12345",
-                Issuer: "https://login.microsoftonline.com/common");
+                Issuer: "https://login.microsoftonline.com/common",
+                ValidateIssuer: "True");
             AuthenticationOptions authNConfig = new(
                 Provider: "AzureAD",
                 Jwt: jwt);
@@ -113,7 +114,8 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
         {
             JwtOptions jwt = new(
                 Audience: "12345",
-                Issuer: string.Empty);
+                Issuer: string.Empty,
+                ValidateIssuer:"True");
             AuthenticationOptions authNConfig = new(
                 Provider: "AzureAD",
                 Jwt: jwt);
@@ -134,7 +136,8 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
 
             jwt = new(
                 Audience: string.Empty,
-                Issuer: DEFAULT_ISSUER);
+                Issuer: DEFAULT_ISSUER,
+                ValidateIssuer: "True");
             authNConfig = new(
                 Provider: "AzureAD",
                 Jwt: jwt);
@@ -151,7 +154,8 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
         {
             JwtOptions jwt = new(
                 Audience: "12345",
-                Issuer: string.Empty);
+                Issuer: string.Empty,
+                ValidateIssuer: "True");
             AuthenticationOptions authNConfig = new(Provider: "EasyAuth", Jwt: jwt);
             RuntimeConfig config = CreateRuntimeConfigWithOptionalAuthN(authNConfig);
 
@@ -169,7 +173,8 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
 
             jwt = new(
                 Audience: string.Empty,
-                Issuer: DEFAULT_ISSUER);
+                Issuer: DEFAULT_ISSUER,
+                ValidateIssuer: "True");
             authNConfig = new(Provider: "EasyAuth", Jwt: jwt);
             config = CreateRuntimeConfigWithOptionalAuthN(authNConfig);
 

@@ -700,17 +700,18 @@ public class RuntimeConfigValidator : IConfigValidator
 
         bool isAudienceSet = !string.IsNullOrEmpty(runtimeConfig.Runtime.Host.Authentication.Jwt?.Audience);
         bool isIssuerSet = !string.IsNullOrEmpty(runtimeConfig.Runtime.Host.Authentication.Jwt?.Issuer);
+        bool isValidateIssuerSet = !string.IsNullOrEmpty(runtimeConfig.Runtime.Host.Authentication.Jwt?.ValidateIssuer);
 
         try
         {
             if (runtimeConfig.Runtime.Host.Authentication.IsJwtConfiguredIdentityProvider() &&
-                (!isAudienceSet || !isIssuerSet))
+                (!isAudienceSet || !isIssuerSet || !isValidateIssuerSet))
             {
                 throw new NotSupportedException("Audience and Issuer must be set when using a JWT identity Provider.");
             }
 
             if ((!runtimeConfig.Runtime.Host.Authentication.IsJwtConfiguredIdentityProvider()) &&
-                (isAudienceSet || isIssuerSet))
+                (isAudienceSet || isIssuerSet || isValidateIssuerSet))
             {
                 throw new NotSupportedException("Audience and Issuer can not be set when a JWT identity provider is not configured.");
             }

@@ -35,6 +35,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Authentication.Helpers
     {
         private const string AUDIENCE = "d727a7e8-1af4-4ce0-8c56-f3107f10bbfd";
         private const string LOCAL_ISSUER = "https://fabrikam.com";
+        private const string VALIDATE_ISSUER = "True";
 
         /// <summary>
         /// Creates customized webhost with:
@@ -137,7 +138,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Authentication.Helpers
             AuthenticationOptions authOptions = new()
             {
                 Provider = "AzureAD",
-                Jwt = new(Audience: AUDIENCE, Issuer: LOCAL_ISSUER)
+                Jwt = new(Audience: AUDIENCE, Issuer: LOCAL_ISSUER, ValidateIssuer: VALIDATE_ISSUER)
             };
 
             RuntimeConfig runtimeConfig = RuntimeConfigAuthHelper.CreateTestConfigWithAuthNProvider(authOptions);
@@ -166,7 +167,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Authentication.Helpers
                                         ValidateAudience = true,
                                         // Validate the JWT Issuer (iss) claim
                                         ValidIssuer = LOCAL_ISSUER,
-                                        ValidateIssuer = true,
+                                        ValidateIssuer = bool.Parse(VALIDATE_ISSUER),
                                         // The signing key must match
                                         ValidateIssuerSigningKey = true,
                                         IssuerSigningKey = key,
