@@ -142,7 +142,7 @@ namespace Cli.Commands
         [Option("runtime.host.authentication.jwt.issuer", Required = false, HelpText = "Configure the entity that issued the Jwt Token.")]
         public string? RuntimeHostAuthenticationJwtIssuer { get; }
 
-        [Option("runtime.host.authentication.jwt.validateissuer", Required = false, HelpText = "Configure the entity that validate issued the Jwt Token.")]
+        [Option("runtime.host.authentication.jwt.validate-issuer", Required = false, HelpText = "Configure the entity that validate issued the Jwt Token.")]
         public string? RuntimeHostAuthenticationJwtValidateIssuer { get; }
 
         public int Handler(ILogger logger, FileSystemRuntimeConfigLoader loader, IFileSystem fileSystem)

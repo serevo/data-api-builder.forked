@@ -99,7 +99,7 @@ namespace Cli.Commands
         [Option("auth.issuer", Required = false, HelpText = "Specify the party that issued the jwt token.")]
         public string? Issuer { get; }
 
-        [Option("auth.validateissuer", Required = false, HelpText = "Specify the party that validate issued the jwt token.")]
+        [Option("auth.validate-issuer", Required = false, HelpText = "Specify the party that validate issued the jwt token.")]
         public string? ValidateIssuer { get; }
 
         [Option("rest.path", Default = RestRuntimeOptions.DEFAULT_PATH, Required = false, HelpText = "Specify the REST endpoint's default prefix.")]

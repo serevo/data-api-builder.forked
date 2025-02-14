@@ -589,20 +589,20 @@ namespace Cli.Tests
         /// in runtime config update. Takes in updated value for host.authentication.jwt.issuer and 
         /// validates whether the runtime config reflects those updated values
         [DataTestMethod]
-        [DataRow("updatedValidateIssuer", DisplayName = "Update authentication.jwt.validateissuer to 'updatedValidateIssuer' for Host.")]
+        [DataRow("updatedValidateIssuer", DisplayName = "Update authentication.jwt.validate-issuer to 'updatedValidateIssuer' for Host.")]
         public void TestUpdateAuthenticationJwtValidateIssuerHostSettings(string updatedJwtValidateIssuerValue)
         {
             // Arrange -> all the setup which includes creating options.
             SetupFileSystemWithInitialConfig(INITIAL_CONFIG);
 
-            // Act: Attempts to update host.authentication.jwt.validateissuer value
+            // Act: Attempts to update host.authentication.jwt.validate-issuer value
             ConfigureOptions options = new(
                 runtimeHostAuthenticationJwtValidateIssuer: updatedJwtValidateIssuerValue,
                 config: TEST_RUNTIME_CONFIG_FILE
             );
             bool isSuccess = TryConfigureSettings(options, _runtimeConfigLoader!, _fileSystem!);
 
-            // Assert: Validate the authentication.jwt.validateissuer in Host is updated
+            // Assert: Validate the authentication.jwt.validate-issuer in Host is updated
             Assert.IsTrue(isSuccess);
             string updatedConfig = _fileSystem!.File.ReadAllText(TEST_RUNTIME_CONFIG_FILE);
             Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(updatedConfig, out RuntimeConfig? runtimeConfig));
