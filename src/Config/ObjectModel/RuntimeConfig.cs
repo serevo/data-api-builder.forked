@@ -22,7 +22,7 @@ public record RuntimeConfig
 
     public RuntimeOptions? Runtime { get; init; }
 
-    public RuntimeEntities Entities { get; init; }
+    public virtual RuntimeEntities Entities { get; init; }
 
     public DataSourceFiles? DataSourceFiles { get; init; }
 
@@ -68,6 +68,12 @@ public record RuntimeConfig
          Runtime.Rest is null ||
          Runtime.Rest.Enabled) &&
          DataSource.DatabaseType != DatabaseType.CosmosDB_NoSQL;
+
+    [JsonIgnore]
+    public bool IsHealthEnabled =>
+        Runtime is null ||
+        Runtime.Health is null ||
+        Runtime.Health.Enabled;
 
     /// <summary>
     /// A shorthand method to determine whether Static Web Apps is configured for the current authentication provider.
@@ -143,6 +149,24 @@ public record RuntimeConfig
         Runtime is not null &&
         Runtime.GraphQL is not null &&
         Runtime.GraphQL.EnableAggregation;
+
+    [JsonIgnore]
+    public HashSet<string> AllowedRolesForHealth =>
+        Runtime?.Health?.Roles ?? new HashSet<string>();
+
+    [JsonIgnore]
+    public int CacheTtlSecondsForHealthReport =>
+        Runtime?.Health?.CacheTtlSeconds ?? EntityCacheOptions.DEFAULT_TTL_SECONDS;
+
+    /// <summary>
+    /// Retrieves the value of runtime.graphql.dwnto1joinopt.enabled property if present, default is false.
+    /// </summary>
+    [JsonIgnore]
+    public bool EnableDwNto1JoinOpt =>
+        Runtime is not null &&
+        Runtime.GraphQL is not null &&
+        Runtime.GraphQL.FeatureFlags is not null &&
+        Runtime.GraphQL.FeatureFlags.EnableDwNto1JoinQueryOptimization;
 
     private Dictionary<string, DataSource> _dataSourceNameToDataSource;
 
@@ -301,7 +325,7 @@ public record RuntimeConfig
     /// <param name="dataSourceName">Name of datasource.</param>
     /// <returns>DataSource object.</returns>
     /// <exception cref="DataApiBuilderException">Not found exception if key is not found.</exception>
-    public DataSource GetDataSourceFromDataSourceName(string dataSourceName)
+    public virtual DataSource GetDataSourceFromDataSourceName(string dataSourceName)
     {
         CheckDataSourceNamePresent(dataSourceName);
         return _dataSourceNameToDataSource[dataSourceName];
@@ -406,7 +430,7 @@ public record RuntimeConfig
     /// <param name="entityName">Name of the entity to check cache configuration.</param>
     /// <returns>Number of seconds (ttl) that a cache entry should be valid before cache eviction.</returns>
     /// <exception cref="DataApiBuilderException">Raised when an invalid entity name is provided or if the entity has caching disabled.</exception>
-    public int GetEntityCacheEntryTtl(string entityName)
+    public virtual int GetEntityCacheEntryTtl(string entityName)
     {
         if (!Entities.TryGetValue(entityName, out Entity? entityConfig))
         {
@@ -440,7 +464,7 @@ public record RuntimeConfig
     /// - whether the datasource is SQL and session context is disabled.
     /// </summary>
     /// <returns>Whether cache operations should proceed.</returns>
-    public bool CanUseCache()
+    public virtual bool CanUseCache()
     {
         bool setSessionContextEnabled = DataSource.GetTypedOptions<MsSqlOptions>()?.SetSessionContext ?? true;
         return IsCachingEnabled && !setSessionContextEnabled;
@@ -572,11 +596,26 @@ public record RuntimeConfig
     /// <summary>
     /// Checks if the property log-level or its value are null
     /// </summary>
-    public bool IsLogLevelNull() =>
-        Runtime is null ||
-        Runtime.Telemetry is null ||
-        Runtime.Telemetry.LoggerLevel is null ||
-        Runtime.Telemetry.LoggerLevel.Value is null;
+    public bool IsLogLevelNull()
+    {
+        if (Runtime is null ||
+            Runtime.Telemetry is null ||
+            Runtime.Telemetry.LoggerLevel is null ||
+            Runtime.Telemetry.LoggerLevel.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (KeyValuePair<string, LogLevel?> logger in Runtime!.Telemetry.LoggerLevel)
+        {
+            if (logger.Key == null)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Takes in the RuntimeConfig object and checks the LogLevel.
@@ -585,15 +624,37 @@ public record RuntimeConfig
     /// If host mode is Development, return `LogLevel.Debug`, else
     /// for production returns `LogLevel.Error`.
     /// </summary>
-    public static LogLevel GetConfiguredLogLevel(RuntimeConfig runtimeConfig)
+    public LogLevel GetConfiguredLogLevel(string loggerFilter = "")
     {
-        LogLevel? value = runtimeConfig.Runtime?.Telemetry?.LoggerLevel?.Value;
-        if (value is not null)
+
+        if (!IsLogLevelNull())
         {
-            return (LogLevel)value;
+            int max = 0;
+            string currentFilter = string.Empty;
+            foreach (KeyValuePair<string, LogLevel?> logger in Runtime!.Telemetry!.LoggerLevel!)
+            {
+                // Checks if the new key that is valid has more priority than the current key
+                if (logger.Key.Length > max && loggerFilter.StartsWith(logger.Key))
+                {
+                    max = logger.Key.Length;
+                    currentFilter = logger.Key;
+                }
+            }
+
+            Runtime!.Telemetry!.LoggerLevel!.TryGetValue(currentFilter, out LogLevel? value);
+            if (value is not null)
+            {
+                return (LogLevel)value;
+            }
+
+            Runtime!.Telemetry!.LoggerLevel!.TryGetValue("default", out value);
+            if (value is not null)
+            {
+                return (LogLevel)value;
+            }
         }
 
-        if (runtimeConfig.IsDevelopmentMode())
+        if (IsDevelopmentMode())
         {
             return LogLevel.Debug;
         }

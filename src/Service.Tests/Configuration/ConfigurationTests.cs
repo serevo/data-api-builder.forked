@@ -18,6 +18,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web;
+using Azure.DataApiBuilder.Auth;
 using Azure.DataApiBuilder.Config;
 using Azure.DataApiBuilder.Config.ObjectModel;
 using Azure.DataApiBuilder.Core;
@@ -38,6 +39,7 @@ using Azure.DataApiBuilder.Service.Tests.Authorization;
 using Azure.DataApiBuilder.Service.Tests.OpenApiIntegration;
 using Azure.DataApiBuilder.Service.Tests.SqlTests;
 using HotChocolate;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -467,6 +469,69 @@ type Moon {
 }
 ";
 
+        public const string CONFIG_FILE_WITH_NO_OPTIONAL_FIELD = @"{
+                                    ""$schema"":""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                                    ""data-source"": {
+                                    ""database-type"": ""mssql"",
+                                    ""connection-string"": ""sample-conn-string""
+                                    },
+                                    ""entities"":{ }
+                                }";
+
+        public const string CONFIG_FILE_WITH_NO_AUTHENTICATION_FIELD = @"{
+                                    // Link for latest draft schema.
+                                    ""$schema"":""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                                    ""data-source"": {
+                                    ""database-type"": ""mssql"",
+                                    ""connection-string"": ""sample-conn-string""
+                                    },
+                                    ""runtime"": {
+                                        ""rest"": {
+                                            ""enabled"": true,
+                                            ""path"": ""/api""
+                                        },
+                                        ""graphql"": {
+                                            ""enabled"": true,
+                                            ""path"": ""/graphql"",
+                                            ""allow-introspection"": true
+                                        },
+                                        ""host"": {
+                                            ""cors"": {
+                                                ""origins"": [
+                                                    ""http://localhost:5000""
+                                                ],
+                                                ""allow-credentials"": false
+                                            }
+                                        }
+                                    },
+                                    ""entities"":{ }
+                                }";
+        public const string CONFIG_FILE_WITH_NO_CORS_FIELD = @"{
+                                    // Link for latest draft schema.
+                                    ""$schema"":""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                                    ""data-source"": {
+                                    ""database-type"": ""mssql"",
+                                    ""connection-string"": ""sample-conn-string""
+                                    },
+                                    ""runtime"": {
+                                        ""rest"": {
+                                            ""enabled"": true,
+                                            ""path"": ""/api""
+                                        },
+                                        ""graphql"": {
+                                            ""enabled"": true,
+                                            ""path"": ""/graphql"",
+                                            ""allow-introspection"": true
+                                        },
+                                        ""host"": {
+                                            ""authentication"": {
+                                                ""provider"": ""StaticWebApps""
+                                            }
+                                        }
+                                    },
+                                    ""entities"":{ }
+                                }";
+
         [TestCleanup]
         public void CleanupAfterEachTest()
         {
@@ -499,7 +564,7 @@ type Moon {
             {
                 if (isUpdateableRuntimeConfig)
                 {
-                    server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(args));
+                    server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(args));
                 }
                 else
                 {
@@ -780,7 +845,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestConflictAlreadySetConfiguration(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint);
@@ -816,7 +881,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestSettingConfigurations(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint);
@@ -831,7 +896,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestInvalidConfigurationAtRuntime(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint, "invalidString");
@@ -846,7 +911,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestSettingFailureConfigurations(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint);
@@ -868,7 +933,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestLongRunningConfigUpdatedHandlerConfigurations(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint);
@@ -907,7 +972,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestSqlSettingPostStartupConfigurations(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             RuntimeConfig configuration = AuthorizationHelpers.InitRuntimeConfig(
@@ -975,7 +1040,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestValidMultiSourceRunTimePostStartupConfigurations(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             RuntimeConfig config = AuthorizationHelpers.InitRuntimeConfig(
@@ -999,7 +1064,7 @@ type Moon {
             Assert.IsTrue(configProvider.TryGetConfig(out RuntimeConfig configuration), "TryGetConfig should return true when the config is set.");
             Assert.IsNotNull(configuration, "Config returned should not be null.");
 
-            Assert.IsNotNull(configuration.DataSource, "The base datasource should get populated in case of late hydration of config inspite of invalid multi-db files.");
+            Assert.IsNotNull(configuration.DataSource, "The base datasource should get populated in case of late hydration of config in-spite of invalid multi-db files.");
             Assert.AreEqual(1, configuration.ListAllDataSources().Count(), "There should be only 1 datasource populated for late hydration of config with invalid multi-db files.");
         }
 
@@ -1017,7 +1082,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestLoadingAccessTokenForCosmosClient(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient httpClient = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint, null, true);
@@ -1111,7 +1176,7 @@ type Moon {
         [DataRow(CONFIGURATION_ENDPOINT_V2)]
         public async Task TestSettingConfigurationCreatesCorrectClasses(string configurationEndpoint)
         {
-            TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>()));
+            TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>()));
             HttpClient client = server.CreateClient();
 
             JsonContent content = GetJsonContentForCosmosConfigRequest(configurationEndpoint);
@@ -1336,7 +1401,7 @@ type Moon {
 
         /// <summary>
         /// This method validates that depth-limit outside the valid range should fail validation
-        /// during `dab validate` and `dab start`.     
+        /// during `dab validate` and `dab start`.
         /// </summary>
         /// <param name="depthLimit"></param>
         /// <param name="expectedSuccess"></param>
@@ -1588,6 +1653,64 @@ type Moon {
                     It.IsAny<Exception>(),
                     (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
                 Times.Once);
+        }
+
+        /// <summary>
+        /// This test method validates a sample DAB runtime config file against DAB's JSON schema definition.
+        /// It asserts that the validation is successful and there are no validation failures when no optional fields are used.
+        /// It also verifies that the expected log message is logged.
+        /// </summary>
+        [DataTestMethod]
+        [DataRow(CONFIG_FILE_WITH_NO_OPTIONAL_FIELD, DisplayName = "Validates schema of the config file with no optional fields.")]
+        [DataRow(CONFIG_FILE_WITH_NO_AUTHENTICATION_FIELD, DisplayName = "Validates schema of the config file with no Authentication field.")]
+        [DataRow(CONFIG_FILE_WITH_NO_CORS_FIELD, DisplayName = "Validates schema of the config file with no Cors field.")]
+        public async Task TestBasicConfigSchemaWithNoOptionalFieldsIsValid(string jsonData)
+        {
+            Mock<ILogger<JsonConfigSchemaValidator>> schemaValidatorLogger = new();
+
+            string jsonSchema = File.ReadAllText("dab.draft.schema.json");
+
+            JsonConfigSchemaValidator jsonSchemaValidator = new(schemaValidatorLogger.Object, new MockFileSystem());
+
+            JsonSchemaValidationResult result = await jsonSchemaValidator.ValidateJsonConfigWithSchemaAsync(jsonSchema, jsonData);
+            Assert.IsTrue(result.IsValid);
+            Assert.IsTrue(EnumerableUtilities.IsNullOrEmpty(result.ValidationErrors));
+            schemaValidatorLogger.Verify(
+                x => x.Log(
+                    LogLevel.Information,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains($"The config satisfies the schema requirements.")),
+                    It.IsAny<Exception>(),
+                    (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                Times.Once);
+        }
+
+        /// <summary>
+        /// The config file does not contain any entity fields, which is expected to be invalid according to the schema.
+        /// The test asserts that the validation fails and there are validation errors.
+        /// It also verifies that the expected error message is logged, indicating that the 'entities' property is required.
+        [TestMethod]
+        public async Task TestBasicConfigSchemaWithNoEntityFieldsIsInvalid()
+        {
+            string jsonData = @"{
+                                    ""$schema"":""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                                    ""data-source"": {
+                                    ""database-type"": ""mssql"",
+                                    ""connection-string"": ""sample-conn-string""
+                                    }
+                                }";
+
+            Mock<ILogger<JsonConfigSchemaValidator>> schemaValidatorLogger = new();
+
+            string jsonSchema = File.ReadAllText("dab.draft.schema.json");
+
+            JsonConfigSchemaValidator jsonSchemaValidator = new(schemaValidatorLogger.Object, new MockFileSystem());
+
+            JsonSchemaValidationResult result = await jsonSchemaValidator.ValidateJsonConfigWithSchemaAsync(jsonSchema, jsonData);
+            Assert.IsFalse(result.IsValid);
+            Assert.IsFalse(EnumerableUtilities.IsNullOrEmpty(result.ValidationErrors));
+            Assert.AreEqual(1, result.ErrorCount);
+            Assert.IsTrue(result.ErrorMessage.Contains("Total schema validation errors: 1\n> PropertyRequired: #/entities"));
         }
 
         /// <summary>
@@ -1858,11 +1981,9 @@ type Moon {
         [DataRow("/graphql?query={book_by_pk(id: 1){title}}",
             HostMode.Production, HttpStatusCode.OK, "data",
             DisplayName = "GraphQL endpoint with query in production mode.")]
-        [DataRow(RestController.REDIRECTED_ROUTE, HostMode.Development, HttpStatusCode.BadRequest,
-            "GraphQL request redirected to favicon.ico.",
+        [DataRow(RestController.REDIRECTED_ROUTE, HostMode.Development, HttpStatusCode.NotFound, "Not Found",
             DisplayName = "Redirected endpoint in development mode.")]
-        [DataRow(RestController.REDIRECTED_ROUTE, HostMode.Production, HttpStatusCode.BadRequest,
-            "GraphQL request redirected to favicon.ico.",
+        [DataRow(RestController.REDIRECTED_ROUTE, HostMode.Production, HttpStatusCode.NotFound, "Not Found",
             DisplayName = "Redirected endpoint in production mode.")]
         public async Task TestInteractiveGraphQLEndpoints(
             string endpoint,
@@ -1886,8 +2007,8 @@ type Moon {
             File.WriteAllText(CUSTOM_CONFIG, configWithCustomHostMode.ToJson());
             string[] args = new[]
             {
-            $"--ConfigFileName={CUSTOM_CONFIG}"
-        };
+                $"--ConfigFileName={CUSTOM_CONFIG}"
+            };
 
             using TestServer server = new(Program.CreateWebHostBuilder(args));
             using HttpClient client = server.CreateClient();
@@ -2300,7 +2421,7 @@ type Moon {
 
             // Hosted Scenario
             // Instantiate new server with no runtime config for post-startup configuration hydration tests.
-            using (TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>())))
+            using (TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>())))
             using (HttpClient client = server.CreateClient())
             {
                 JsonContent content = GetPostStartupConfigParams(MSSQL_ENVIRONMENT, configuration, configurationEndpoint);
@@ -3344,7 +3465,7 @@ type Planet @model(name:""PlanetAlias"") {
             }
 
             // Instantiate new server with no runtime config for post-startup configuration hydration tests.
-            using (TestServer server = new(Program.CreateWebHostFromInMemoryUpdateableConfBuilder(Array.Empty<string>())))
+            using (TestServer server = new(Program.CreateWebHostFromInMemoryUpdatableConfBuilder(Array.Empty<string>())))
             using (HttpClient client = server.CreateClient())
             {
                 JsonContent content = GetPostStartupConfigParams(MSSQL_ENVIRONMENT, configuration, configurationEndpoint);
@@ -3528,12 +3649,14 @@ type Planet @model(name:""PlanetAlias"") {
         [DataRow(null, DisplayName = "Validates log level Null deserialized correctly")]
         public void TestExistingLogLevels(LogLevel expectedLevel)
         {
-            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(expectedLevel);
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add("default", expectedLevel);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
 
             string configWithCustomLogLevelJson = configWithCustomLogLevel.ToJson();
             Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomLogLevelJson, out RuntimeConfig deserializedRuntimeConfig));
 
-            Assert.AreEqual(expectedLevel, deserializedRuntimeConfig.Runtime.Telemetry.LoggerLevel.Value);
+            Assert.AreEqual(expectedLevel, deserializedRuntimeConfig.Runtime.Telemetry.LoggerLevel["default"]);
         }
 
         /// <summary>
@@ -3546,7 +3669,9 @@ type Planet @model(name:""PlanetAlias"") {
         [DataRow(12, DisplayName = "Validates that a bigger positive log level value that does not exist, fails to build")]
         public void TestNonExistingLogLevels(LogLevel expectedLevel)
         {
-            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(expectedLevel);
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add("default", expectedLevel);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
 
             // Try should fail and go to catch exception
             try
@@ -3572,7 +3697,9 @@ type Planet @model(name:""PlanetAlias"") {
         [DataRow(null)]
         public void LogLevelSerialization(LogLevel expectedLevel)
         {
-            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(expectedLevel);
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add("default", expectedLevel);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
             string configWithCustomLogLevelJson = configWithCustomLogLevel.ToJson();
             Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomLogLevelJson, out RuntimeConfig deserializedRuntimeConfig));
 
@@ -3588,24 +3715,180 @@ type Planet @model(name:""PlanetAlias"") {
                 bool logLevelPropertyExists = telemetryElement.TryGetProperty("log-level", out JsonElement logLevelElement);
                 Assert.AreEqual(expected: true, actual: logLevelPropertyExists);
 
-                //Validate level property inside log-level is of expected value
-                bool levelPropertyExists = logLevelElement.TryGetProperty("level", out JsonElement levelElement);
-                Assert.AreEqual(expected: true, actual: levelPropertyExists);
+                //Validate the dictionary inside the log-level property is of expected value
+                bool dictionaryLogLevelExists = logLevelElement.TryGetProperty("default", out JsonElement levelElement);
+                Assert.AreEqual(expected: true, actual: dictionaryLogLevelExists);
                 Assert.AreEqual(expectedLevel.ToString().ToLower(), levelElement.GetString());
+            }
+        }
+
+        /// <summary>
+        /// Tests different log level filters that are valid and check that they are deserialized correctly
+        /// </summary>
+        [Ignore]
+        [DataTestMethod]
+        [TestCategory(TestCategory.MSSQL)]
+        [DataRow(LogLevel.Trace, typeof(RuntimeConfigValidator))]
+        [DataRow(LogLevel.Debug, typeof(SqlQueryEngine))]
+        [DataRow(LogLevel.Information, typeof(IQueryExecutor))]
+        [DataRow(LogLevel.Warning, typeof(ISqlMetadataProvider))]
+        [DataRow(LogLevel.Error, typeof(BasicHealthReportResponseWriter))]
+        [DataRow(LogLevel.Critical, typeof(ComprehensiveHealthReportResponseWriter))]
+        [DataRow(LogLevel.None, typeof(RestController))]
+        [DataRow(LogLevel.Trace, typeof(ClientRoleHeaderAuthenticationMiddleware))]
+        [DataRow(LogLevel.Debug, typeof(ConfigurationController))]
+        [DataRow(LogLevel.Information, typeof(IAuthorizationHandler))]
+        [DataRow(LogLevel.Warning, typeof(IAuthorizationResolver))]
+        public void ValidLogLevelFilters(LogLevel logLevel, Type loggingType)
+        {
+            string loggingFilter = loggingType.FullName;
+            ValidateLogLevelFilters(logLevel, loggingFilter);
+        }
+
+        /// <summary>
+        /// Tests different log level filters that are valid and check that they are deserialized correctly
+        /// This test uses strings as we are checking for values that are not avaliable using the typeof() function
+        /// It is the same test as ValidLogLevelFilters.
+        /// </summary>
+        [DataTestMethod]
+        [TestCategory(TestCategory.MSSQL)]
+        [DataRow(LogLevel.Trace, "default")]
+        [DataRow(LogLevel.Debug, "Azure")]
+        [DataRow(LogLevel.Information, "Azure.DataApiBuilder")]
+        [DataRow(LogLevel.Warning, "Azure.DataApiBuilder.Core")]
+        [DataRow(LogLevel.Error, "Azure.DataApiBuilder.Core.Configurations")]
+        [DataRow(LogLevel.Critical, "Azure.DataApiBuilder.Core.Resolvers")]
+        [DataRow(LogLevel.None, "Azure.DataApiBuilder.Core.Services")]
+        [DataRow(LogLevel.Trace, "Azure.DataApiBuilder.Service")]
+        [DataRow(LogLevel.Debug, "Azure.DataApiBuilder.Service.HealthCheck")]
+        [DataRow(LogLevel.Information, "Azure.DataApiBuilder.Service.Controllers")]
+        [DataRow(LogLevel.Warning, "Microsoft.AspNetCore")]
+        public void ValidStringLogLevelFilters(LogLevel logLevel, string loggingFilter)
+        {
+            ValidateLogLevelFilters(logLevel, loggingFilter);
+        }
+
+        /// <summary>
+        /// General method that is used to test the valid log level filters.
+        /// </summary>
+        /// <param name="logLevel"></param>
+        /// <param name="loggingFilter"></param>
+        private static void ValidateLogLevelFilters(LogLevel logLevel, string loggingFilter)
+        {
+            // Arrange
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add(loggingFilter, logLevel);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
+
+            File.WriteAllText(CUSTOM_CONFIG_FILENAME, configWithCustomLogLevel.ToJson());
+            string[] args = new[]
+            {
+                $"--ConfigFileName={CUSTOM_CONFIG_FILENAME}"
+            };
+
+            // Start a new server with the custom log level to ensure the
+            // instantiation of the valid log level filters works as expected.
+            TestServer server = new(Program.CreateWebHostBuilder(args));
+            RuntimeConfigProvider runtimeConfigProvider = server.Services.GetService<RuntimeConfigProvider>();
+
+            // RuntimeConfig with instantiated log level filters.
+            RuntimeConfig serverRuntimeConfig = runtimeConfigProvider.GetConfig();
+
+            // Act
+            try
+            {
+                RuntimeConfigValidator.ValidateLoggerFilters(serverRuntimeConfig);
+            }
+            catch
+            {
+                Assert.Fail();
+            }
+
+            // Assert
+            string configWithCustomLogLevelJson = configWithCustomLogLevel.ToJson();
+            Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomLogLevelJson, out RuntimeConfig deserializedRuntimeConfig));
+
+            Dictionary<string, LogLevel?> actualLoggerLevel = deserializedRuntimeConfig.Runtime.Telemetry.LoggerLevel;
+            Assert.IsTrue(actualLoggerLevel.ContainsKey(loggingFilter) && actualLoggerLevel.Count == 1);
+            Assert.IsTrue(actualLoggerLevel[loggingFilter] == logLevel);
+        }
+
+        /// <summary>
+        /// Tests that between multiple log level filters,
+        /// the one that is more specific is always given priority.
+        /// </summary>
+        [DataTestMethod]
+        [TestCategory(TestCategory.MSSQL)]
+        [DataRow(LogLevel.Debug, "Azure", LogLevel.Warning, "default", typeof(IQueryExecutor))]
+        [DataRow(LogLevel.Information, "Azure.DataApiBuilder", LogLevel.Error, "Azure", typeof(IQueryExecutor))]
+        [DataRow(LogLevel.Warning, "Azure.DataApiBuilder.Core", LogLevel.Critical, "Azure.DataApiBuilder", typeof(RuntimeConfigValidator))]
+        [DataRow(LogLevel.Error, "Azure.DataApiBuilder.Core.Configurations", LogLevel.None, "Azure.DataApiBuilder.Core", typeof(RuntimeConfigValidator))]
+        public void PriorityLogLevelFilters(LogLevel highPriLevel, string highPriFilter, LogLevel lowPriLevel, string lowPriFilter, Type type)
+        {
+            string classString = type.FullName;
+            Startup.AddValidFilters();
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add(highPriFilter, highPriLevel);
+            logLevelOptions.Add(lowPriFilter, lowPriLevel);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
+            try
+            {
+                RuntimeConfigValidator.ValidateLoggerFilters(configWithCustomLogLevel);
+            }
+            catch
+            {
+                Assert.Fail();
+            }
+
+            string configWithCustomLogLevelJson = configWithCustomLogLevel.ToJson();
+            Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomLogLevelJson, out RuntimeConfig deserializedRuntimeConfig));
+
+            // If filters are not a subsection from the classString, then the test will not work.
+            LogLevel actualLogLevel = deserializedRuntimeConfig.GetConfiguredLogLevel(classString);
+
+            Assert.AreEqual(expected: highPriLevel, actual: actualLogLevel);
+        }
+
+        /// <summary>
+        /// Tests log level filters that are not available and checks that they give the correct error.
+        /// </summary>
+        [DataTestMethod]
+        [TestCategory(TestCategory.MSSQL)]
+        [DataRow("Azure.DataApiBuilder.Core.Configur", DisplayName = "Validates that an incomplete log level keyword fails to build")]
+        [DataRow("Azure.DataApiBuilder.Core.Configurations.RuntimeConfigVldtr", DisplayName = "Validates that a wrong name at end of log level keyword fails to build")]
+        [DataRow("Azre.DataApiBuilder.Core.Configurations.RuntimeConfigValidator", DisplayName = "Validates that a wrong name at start of log level keyword fails to build")]
+        [DataRow("Azure.DataApiBuilder.Core.Configurations.RuntimeConfigValidator.Extra", DisplayName = "Validates that log level keyword with additional path fails to build")]
+        [DataRow("Microsoft.AspNetCore.Authorizatin.IAuthorizationHandler", DisplayName = "Validates that a wrong name inside of log level keyword fails to build")]
+        [DataRow("defult", DisplayName = "Validates that a wrong name for 'default' log level keyword fails to build")]
+        public void InvalidLogLevelFilters(string loggingFilter)
+        {
+            Dictionary<string, LogLevel?> logLevelOptions = new();
+            logLevelOptions.Add(loggingFilter, LogLevel.Debug);
+            RuntimeConfig configWithCustomLogLevel = InitializeRuntimeWithLogLevel(logLevelOptions);
+
+            // Try should fail and go to catch exception
+            try
+            {
+                RuntimeConfigValidator.ValidateLoggerFilters(configWithCustomLogLevel);
+                Assert.Fail();
+            }
+            // Catch verifies that the exception is due to LogLevel having a key that is invalid
+            catch (Exception ex)
+            {
+                Assert.AreEqual(typeof(NotSupportedException), ex.GetType());
             }
         }
 
         /// <summary>
         /// Helper method to create RuntimeConfig with specificed LogLevel value
         /// </summary>
-        private static RuntimeConfig InitializeRuntimeWithLogLevel(LogLevel? expectedLevel)
+        private static RuntimeConfig InitializeRuntimeWithLogLevel(Dictionary<string, LogLevel?> logLevelOptions)
         {
             TestHelper.SetupDatabaseEnvironment(MSSQL_ENVIRONMENT);
 
             FileSystemRuntimeConfigLoader baseLoader = TestHelper.GetRuntimeConfigLoader();
             baseLoader.TryLoadKnownConfig(out RuntimeConfig baseConfig);
 
-            LogLevelOptions logLevelOptions = new(Value: expectedLevel);
             RuntimeConfig config = new(
                 Schema: baseConfig.Schema,
                 DataSource: baseConfig.DataSource,
@@ -3651,7 +3934,7 @@ type Planet @model(name:""PlanetAlias"") {
             { "Book", requiredEntity }
         };
 
-            CreateCustomConfigFile(globalRestEnabled: globalRestEnabled, entityMap);
+            CreateCustomConfigFile(entityMap, globalRestEnabled);
 
             string[] args = new[]
             {
@@ -3712,7 +3995,7 @@ type Planet @model(name:""PlanetAlias"") {
                 { "Book", requiredEntity }
             };
 
-            CreateCustomConfigFile(globalRestEnabled: true, entityMap);
+            CreateCustomConfigFile(entityMap, enableGlobalRest: true);
 
             string[] args = new[]
             {
@@ -3734,44 +4017,7 @@ type Planet @model(name:""PlanetAlias"") {
             Dictionary<string, JsonElement> responseProperties = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(responseBody);
             Assert.AreEqual(expected: HttpStatusCode.OK, actual: response.StatusCode, message: "Received unexpected HTTP code from health check endpoint.");
 
-            // Validate value of 'status' property in reponse.
-            if (responseProperties.TryGetValue(key: "status", out JsonElement statusValue))
-            {
-                Assert.AreEqual(
-                    expected: "Healthy",
-                    actual: statusValue.ToString(),
-                    message: "Expected endpoint to report 'Healthy'.");
-            }
-            else
-            {
-                Assert.Fail();
-            }
-
-            // Validate value of 'version' property in response.
-            if (responseProperties.TryGetValue(key: DabHealthCheck.DAB_VERSION_KEY, out JsonElement versionValue))
-            {
-                Assert.AreEqual(
-                    expected: ProductInfo.GetProductVersion(),
-                    actual: versionValue.ToString(),
-                    message: "Unexpected or missing version value.");
-            }
-            else
-            {
-                Assert.Fail();
-            }
-
-            // Validate value of 'app-name' property in response.
-            if (responseProperties.TryGetValue(key: DabHealthCheck.DAB_APPNAME_KEY, out JsonElement appNameValue))
-            {
-                Assert.AreEqual(
-                    expected: ProductInfo.GetDataApiBuilderUserAgent(),
-                    actual: appNameValue.ToString(),
-                    message: "Unexpected or missing DAB user agent string.");
-            }
-            else
-            {
-                Assert.Fail();
-            }
+            HealthEndpointTests.ValidateBasicDetailsHealthCheckResponse(responseProperties);
         }
 
         /// <summary>
@@ -3807,7 +4053,7 @@ type Planet @model(name:""PlanetAlias"") {
             { "Publisher", restDisabledEntity }
         };
 
-            CreateCustomConfigFile(globalRestEnabled: true, entityMap);
+            CreateCustomConfigFile(entityMap, enableGlobalRest: true);
 
             string[] args = new[]
             {
@@ -3886,7 +4132,7 @@ type Planet @model(name:""PlanetAlias"") {
                 { ENTITY_NAME, requiredEntity }
             };
 
-            CreateCustomConfigFile(globalRestEnabled: true, entityMap);
+            CreateCustomConfigFile(entityMap, enableGlobalRest: true);
 
             string[] args = new[]
             {
@@ -3938,7 +4184,7 @@ type Planet @model(name:""PlanetAlias"") {
 
         /// <summary>
         /// Tests the enforcement of depth limit restrictions on GraphQL queries and mutations in non-hosted mode.
-        /// Verifies that requests exceeding the specified depth limit result in a BadRequest, 
+        /// Verifies that requests exceeding the specified depth limit result in a BadRequest,
         /// while requests within the limit succeed with the expected status code.
         /// Also verifies that the error message contains the current and allowed max depth limit value.
         /// Example:
@@ -4207,19 +4453,22 @@ type Planet @model(name:""PlanetAlias"") {
         /// Helper function to write custom configuration file. with minimal REST/GraphQL global settings
         /// using the supplied entities.
         /// </summary>
-        /// <param name="globalRestEnabled">flag to enable or disabled REST globally.</param>
         /// <param name="entityMap">Collection of entityName -> Entity object.</param>
-        private static void CreateCustomConfigFile(bool globalRestEnabled, Dictionary<string, Entity> entityMap)
+        /// <param name="enableGlobalRest">flag to enable or disabled REST globally.</param>
+        private static void CreateCustomConfigFile(Dictionary<string, Entity> entityMap, bool enableGlobalRest = true)
         {
-            DataSource dataSource = new(DatabaseType.MSSQL, GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL), Options: null);
+            DataSource dataSource = new(
+                DatabaseType.MSSQL,
+                GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL),
+                Options: null);
             HostOptions hostOptions = new(Cors: null, Authentication: new() { Provider = nameof(EasyAuthType.StaticWebApps) });
 
             RuntimeConfig runtimeConfig = new(
                 Schema: string.Empty,
                 DataSource: dataSource,
                 Runtime: new(
-                    Rest: new(Enabled: globalRestEnabled),
-                    GraphQL: new(),
+                    Rest: new(Enabled: enableGlobalRest),
+                    GraphQL: new(Enabled: true),
                     Host: hostOptions
                 ),
                 Entities: new(entityMap));
@@ -4627,9 +4876,9 @@ type Planet @model(name:""PlanetAlias"") {
             entityName ??= "Book";
 
             Dictionary<string, Entity> entityMap = new()
-        {
-            { entityName, entity }
-        };
+            {
+                { entityName, entity }
+            };
 
             // Adding an entity with only Authorized Access
             Entity anotherEntity = new(
