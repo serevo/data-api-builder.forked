@@ -246,16 +246,24 @@ public abstract class RuntimeConfigLoader
         options.Converters.Add(new EntityHealthOptionsConvertorFactory());
         options.Converters.Add(new RestRuntimeOptionsConverterFactory());
         options.Converters.Add(new GraphQLRuntimeOptionsConverterFactory(replaceEnvVar));
+        options.Converters.Add(new McpRuntimeOptionsConverterFactory(replaceEnvVar));
+        options.Converters.Add(new DmlToolsConfigConverter());
         options.Converters.Add(new EntitySourceConverterFactory(replaceEnvVar));
         options.Converters.Add(new EntityGraphQLOptionsConverterFactory(replaceEnvVar));
         options.Converters.Add(new EntityRestOptionsConverterFactory(replaceEnvVar));
         options.Converters.Add(new EntityActionConverterFactory());
         options.Converters.Add(new DataSourceFilesConverter());
-        options.Converters.Add(new EntityCacheOptionsConverterFactory());
+        options.Converters.Add(new EntityCacheOptionsConverterFactory(replaceEnvVar));
+        options.Converters.Add(new RuntimeCacheOptionsConverterFactory());
+        options.Converters.Add(new RuntimeCacheLevel2OptionsConverterFactory());
         options.Converters.Add(new MultipleCreateOptionsConverter());
         options.Converters.Add(new MultipleMutationOptionsConverter(options));
         options.Converters.Add(new DataSourceConverterFactory(replaceEnvVar));
         options.Converters.Add(new HostOptionsConvertorFactory());
+        options.Converters.Add(new AKVRetryPolicyOptionsConverterFactory(replaceEnvVar));
+        options.Converters.Add(new AzureLogAnalyticsOptionsConverterFactory(replaceEnvVar));
+        options.Converters.Add(new AzureLogAnalyticsAuthOptionsConverter(replaceEnvVar));
+        options.Converters.Add(new FileSinkConverter(replaceEnvVar));
 
         if (replaceEnvVar)
         {

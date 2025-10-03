@@ -22,6 +22,9 @@ public record RuntimeConfig
 
     public RuntimeOptions? Runtime { get; init; }
 
+    [JsonPropertyName("azure-key-vault")]
+    public AzureKeyVaultOptions? AzureKeyVault { get; init; }
+
     public virtual RuntimeEntities Entities { get; init; }
 
     public DataSourceFiles? DataSourceFiles { get; init; }
@@ -68,6 +71,15 @@ public record RuntimeConfig
          Runtime.Rest is null ||
          Runtime.Rest.Enabled) &&
          DataSource.DatabaseType != DatabaseType.CosmosDB_NoSQL;
+
+    /// <summary>
+    /// Retrieves the value of runtime.mcp.enabled property if present, default is true.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsMcpEnabled =>
+        Runtime is null ||
+        Runtime.Mcp is null ||
+        Runtime.Mcp.Enabled;
 
     [JsonIgnore]
     public bool IsHealthEnabled =>
@@ -120,6 +132,25 @@ public record RuntimeConfig
             else
             {
                 return Runtime.GraphQL.Path;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The path at which MCP API is available
+    /// </summary>
+    [JsonIgnore]
+    public string McpPath
+    {
+        get
+        {
+            if (Runtime is null || Runtime.Mcp is null || Runtime.Mcp.Path is null)
+            {
+                return McpRuntimeOptions.DEFAULT_PATH;
+            }
+            else
+            {
+                return Runtime.Mcp.Path;
             }
         }
     }
@@ -216,11 +247,13 @@ public record RuntimeConfig
         DataSource DataSource,
         RuntimeEntities Entities,
         RuntimeOptions? Runtime = null,
-        DataSourceFiles? DataSourceFiles = null)
+        DataSourceFiles? DataSourceFiles = null,
+        AzureKeyVaultOptions? AzureKeyVault = null)
     {
         this.Schema = Schema ?? DEFAULT_CONFIG_SCHEMA_LINK;
         this.DataSource = DataSource;
         this.Runtime = Runtime;
+        this.AzureKeyVault = AzureKeyVault;
         this.Entities = Entities;
         this.DefaultDataSourceName = Guid.NewGuid().ToString();
 
@@ -305,7 +338,7 @@ public record RuntimeConfig
     /// <param name="DataSourceNameToDataSource">Dictionary mapping datasourceName to datasource object.</param>
     /// <param name="EntityNameToDataSourceName">Dictionary mapping entityName to datasourceName.</param>
     /// <param name="DataSourceFiles">Datasource files which represent list of child runtimeconfigs for multi-db scenario.</param>
-    public RuntimeConfig(string Schema, DataSource DataSource, RuntimeOptions Runtime, RuntimeEntities Entities, string DefaultDataSourceName, Dictionary<string, DataSource> DataSourceNameToDataSource, Dictionary<string, string> EntityNameToDataSourceName, DataSourceFiles? DataSourceFiles = null)
+    public RuntimeConfig(string Schema, DataSource DataSource, RuntimeOptions Runtime, RuntimeEntities Entities, string DefaultDataSourceName, Dictionary<string, DataSource> DataSourceNameToDataSource, Dictionary<string, string> EntityNameToDataSourceName, DataSourceFiles? DataSourceFiles = null, AzureKeyVaultOptions? AzureKeyVault = null)
     {
         this.Schema = Schema;
         this.DataSource = DataSource;
@@ -315,6 +348,7 @@ public record RuntimeConfig
         _dataSourceNameToDataSource = DataSourceNameToDataSource;
         _entityNameToDataSourceName = EntityNameToDataSourceName;
         this.DataSourceFiles = DataSourceFiles;
+        this.AzureKeyVault = AzureKeyVault;
 
         SetupDataSourcesUsed();
     }
@@ -459,6 +493,41 @@ public record RuntimeConfig
     }
 
     /// <summary>
+    /// Returns the cache level value for a given entity.
+    /// If the property is not set, returns the default (L1L2) for a given entity.
+    /// </summary>
+    /// <param name="entityName">Name of the entity to check cache configuration.</param>
+    /// <returns>Cache level that a cache entry should be stored in.</returns>
+    /// <exception cref="DataApiBuilderException">Raised when an invalid entity name is provided or if the entity has caching disabled.</exception>
+    public virtual EntityCacheLevel GetEntityCacheEntryLevel(string entityName)
+    {
+        if (!Entities.TryGetValue(entityName, out Entity? entityConfig))
+        {
+            throw new DataApiBuilderException(
+                message: $"{entityName} is not a valid entity.",
+                statusCode: HttpStatusCode.BadRequest,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.EntityNotFound);
+        }
+
+        if (!entityConfig.IsCachingEnabled)
+        {
+            throw new DataApiBuilderException(
+                message: $"{entityName} does not have caching enabled.",
+                statusCode: HttpStatusCode.BadRequest,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.NotSupported);
+        }
+
+        if (entityConfig.Cache.UserProvidedLevelOptions)
+        {
+            return entityConfig.Cache.Level.Value;
+        }
+        else
+        {
+            return EntityCacheLevel.L1L2;
+        }
+    }
+
+    /// <summary>
     /// Whether the caching service should be used for a given operation. This is determined by
     /// - whether caching is enabled globally
     /// - whether the datasource is SQL and session context is disabled.
@@ -549,6 +618,11 @@ public record RuntimeConfig
     public uint MaxPageSize()
     {
         return (uint?)Runtime?.Pagination?.MaxPageSize ?? PaginationOptions.MAX_PAGE_SIZE;
+    }
+
+    public bool NextLinkRelative()
+    {
+        return Runtime?.Pagination?.NextLinkRelative ?? false;
     }
 
     public int MaxResponseSizeMB()
@@ -661,4 +735,10 @@ public record RuntimeConfig
 
         return LogLevel.Error;
     }
+
+    /// <summary>
+    /// Gets the MCP DML tools configuration
+    /// </summary>
+    [JsonIgnore]
+    public DmlToolsConfig? McpDmlTools => Runtime?.Mcp?.DmlTools;
 }
