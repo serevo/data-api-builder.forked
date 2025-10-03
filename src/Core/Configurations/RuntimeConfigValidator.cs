@@ -82,6 +82,7 @@ public class RuntimeConfigValidator : IConfigValidator
         ValidateAppInsightsTelemetryConnectionString(runtimeConfig);
         ValidateLoggerFilters(runtimeConfig);
         ValidateAzureLogAnalyticsAuth(runtimeConfig);
+        ValidateFileSinkPath(runtimeConfig);
 
         // Running these graphQL validations only in development mode to ensure
         // fast startup of engine in production mode.
@@ -171,6 +172,61 @@ public class RuntimeConfigValidator : IConfigValidator
             {
                 HandleOrRecordException(new DataApiBuilderException(
                     message: "Azure Log Analytics Auth options 'custom-table-name', 'dcr-immutable-id', and 'dce-endpoint' cannot be null or empty if enabled.",
+                    statusCode: HttpStatusCode.ServiceUnavailable,
+                    subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+            }
+        }
+    }
+
+    /// <summary>
+    /// The path in File Sink is required if it is enabled.
+    /// </summary>
+    public void ValidateFileSinkPath(RuntimeConfig runtimeConfig)
+    {
+        if (runtimeConfig.Runtime!.Telemetry is not null && runtimeConfig.Runtime.Telemetry.File is not null)
+        {
+            FileSinkOptions fileSinkOptions = runtimeConfig.Runtime.Telemetry.File;
+            if (fileSinkOptions.Enabled && string.IsNullOrWhiteSpace(fileSinkOptions.Path))
+            {
+                HandleOrRecordException(new DataApiBuilderException(
+                    message: "File option 'path' cannot be null or empty if enabled.",
+                    statusCode: HttpStatusCode.ServiceUnavailable,
+                    subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+            }
+
+            if (fileSinkOptions.Path.Length > 260)
+            {
+                _logger.LogWarning("File option 'path' exceeds 260 characters, it is recommended that the path does not exceed this limit.");
+            }
+
+            // Checks if path is valid by checking if there are any invalid characters and then
+            // attempting to retrieve the full path, returns an exception if it is unable.
+            try
+            {
+                string fileName = System.IO.Path.GetFileName(fileSinkOptions.Path);
+                if (string.IsNullOrWhiteSpace(fileName) || fileName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) != -1)
+                {
+                    HandleOrRecordException(new DataApiBuilderException(
+                        message: "File option 'path' cannot have invalid characters in its directory or file name.",
+                        statusCode: HttpStatusCode.ServiceUnavailable,
+                        subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+                }
+
+                string? directoryName = System.IO.Path.GetDirectoryName(fileSinkOptions.Path);
+                if (directoryName is not null && directoryName.IndexOfAny(System.IO.Path.GetInvalidPathChars()) != -1)
+                {
+                    HandleOrRecordException(new DataApiBuilderException(
+                        message: "File option 'path' cannot have invalid characters in its directory or file name.",
+                        statusCode: HttpStatusCode.ServiceUnavailable,
+                        subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+                }
+
+                System.IO.Path.GetFullPath(fileSinkOptions.Path);
+            }
+            catch (Exception ex)
+            {
+                HandleOrRecordException(new DataApiBuilderException(
+                    message: ex.Message,
                     statusCode: HttpStatusCode.ServiceUnavailable,
                     subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
             }
@@ -646,11 +702,11 @@ public class RuntimeConfigValidator : IConfigValidator
     /// <param name="runtimeConfig">The config that will be validated.</param>
     public void ValidateGlobalEndpointRouteConfig(RuntimeConfig runtimeConfig)
     {
-        // Both REST and GraphQL endpoints cannot be disabled at the same time.
-        if (!runtimeConfig.IsRestEnabled && !runtimeConfig.IsGraphQLEnabled)
+        // REST, GraphQL and MCP endpoints cannot be disabled at the same time.
+        if (!runtimeConfig.IsRestEnabled && !runtimeConfig.IsGraphQLEnabled && !runtimeConfig.IsMcpEnabled)
         {
             HandleOrRecordException(new DataApiBuilderException(
-                message: $"Both GraphQL and REST endpoints are disabled.",
+                message: $"GraphQL, REST, and MCP endpoints are disabled.",
                 statusCode: HttpStatusCode.ServiceUnavailable,
                 subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
         }
@@ -679,19 +735,30 @@ public class RuntimeConfigValidator : IConfigValidator
 
         ValidateRestURI(runtimeConfig);
         ValidateGraphQLURI(runtimeConfig);
-        // Do not check for conflicts if GraphQL or REST endpoints are disabled.
-        if (!runtimeConfig.IsRestEnabled || !runtimeConfig.IsGraphQLEnabled)
+        ValidateMcpUri(runtimeConfig);
+        // Do not check for conflicts if two of the endpoints are disabled between GraphQL, REST, and MCP.
+        if ((!runtimeConfig.IsRestEnabled && !runtimeConfig.IsGraphQLEnabled) ||
+            (!runtimeConfig.IsRestEnabled && !runtimeConfig.IsMcpEnabled) ||
+            (!runtimeConfig.IsGraphQLEnabled && !runtimeConfig.IsMcpEnabled))
         {
             return;
         }
 
         if (string.Equals(
-            a: runtimeConfig.RestPath,
-            b: runtimeConfig.GraphQLPath,
-            comparisonType: StringComparison.OrdinalIgnoreCase))
+                a: runtimeConfig.RestPath,
+                b: runtimeConfig.GraphQLPath,
+                comparisonType: StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                a: runtimeConfig.RestPath,
+                b: runtimeConfig.McpPath,
+                comparisonType: StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(
+                a: runtimeConfig.McpPath,
+                b: runtimeConfig.GraphQLPath,
+                comparisonType: StringComparison.OrdinalIgnoreCase))
         {
             HandleOrRecordException(new DataApiBuilderException(
-                message: $"Conflicting GraphQL and REST path configuration.",
+                message: $"Conflicting path configuration between GraphQL, REST, and MCP.",
                 statusCode: HttpStatusCode.ServiceUnavailable,
                 subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
         }
@@ -733,6 +800,41 @@ public class RuntimeConfigValidator : IConfigValidator
         {
             HandleOrRecordException(new DataApiBuilderException(
                 message: $"{ApiType.GraphQL} path {exceptionMsgSuffix}",
+                statusCode: HttpStatusCode.ServiceUnavailable,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+        }
+    }
+
+    /// <summary>
+    /// Method to validate that the MCP URI (MCP path prefix).
+    /// </summary>
+    /// <param name="runtimeConfig"></param>
+    public void ValidateMcpUri(RuntimeConfig runtimeConfig)
+    {
+        // Skip validation if MCP is not configured
+        if (runtimeConfig.Runtime?.Mcp is null)
+        {
+            return;
+        }
+
+        // Get the MCP path from the configuration
+        string? mcpPath = runtimeConfig.Runtime.Mcp.Path;
+
+        // Validate that the path is not null or empty when MCP is configured
+        if (string.IsNullOrWhiteSpace(mcpPath))
+        {
+            HandleOrRecordException(new DataApiBuilderException(
+                message: "MCP path cannot be null or empty when MCP is configured.",
+                statusCode: HttpStatusCode.ServiceUnavailable,
+                subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
+            return;
+        }
+
+        // Validate the MCP path using the same validation as REST and GraphQL
+        if (!RuntimeConfigValidatorUtil.TryValidateUriComponent(mcpPath, out string exceptionMsgSuffix))
+        {
+            HandleOrRecordException(new DataApiBuilderException(
+                message: $"MCP path {exceptionMsgSuffix}",
                 statusCode: HttpStatusCode.ServiceUnavailable,
                 subStatusCode: DataApiBuilderException.SubStatusCodes.ConfigValidationError));
         }
