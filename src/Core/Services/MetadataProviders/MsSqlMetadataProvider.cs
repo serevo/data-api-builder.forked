@@ -200,11 +200,14 @@ namespace Azure.DataApiBuilder.Core.Services
             // Loop through parameters specified in config, throw error if not found in schema
             // else set runtime config defined default values.
             // Note: we defer type checking of parameters specified in config until request time
-            Dictionary<string, object>? configParameters = procedureEntity.Source.Parameters;
+            List<ParameterMetadata>? configParameters = procedureEntity.Source.Parameters;
             if (configParameters is not null)
             {
-                foreach ((string configParamKey, object configParamValue) in configParameters)
+                foreach (ParameterMetadata paramMetadata in configParameters)
                 {
+                    string configParamKey = paramMetadata.Name;
+                    object? configParamValue = paramMetadata.Default;
+
                     if (!storedProcedureDefinition.Parameters.TryGetValue(configParamKey, out ParameterDefinition? parameterDefinition))
                     {
                         throw new DataApiBuilderException(
@@ -214,8 +217,11 @@ namespace Azure.DataApiBuilder.Core.Services
                     }
                     else
                     {
-                        parameterDefinition.HasConfigDefault = true;
-                        parameterDefinition.ConfigDefaultValue = configParamValue?.ToString();
+                        parameterDefinition.Description = paramMetadata.Description;
+                        parameterDefinition.Required = paramMetadata.Required;
+                        parameterDefinition.Default = paramMetadata.Default;
+                        parameterDefinition.HasConfigDefault = paramMetadata.Default is not null;
+                        parameterDefinition.ConfigDefaultValue = paramMetadata.Default?.ToString();
                     }
                 }
             }
@@ -247,6 +253,7 @@ namespace Azure.DataApiBuilder.Core.Services
             // GraphQL is enabled/disabled. The linking object definitions are not exposed in the schema to the user.
             Entity linkingEntity = new(
                 Source: new EntitySource(Type: EntitySourceType.Table, Object: linkingObject, Parameters: null, KeyFields: null),
+                Fields: null,
                 Rest: new(Array.Empty<SupportedHttpVerb>(), Enabled: false),
                 GraphQL: new(Singular: linkingEntityName, Plural: linkingEntityName, Enabled: false),
                 Permissions: Array.Empty<EntityPermission>(),
@@ -282,6 +289,39 @@ namespace Azure.DataApiBuilder.Core.Services
                 dbType = 0;
                 return false;
             }
+        }
+
+        /// <inheritdoc/>
+        protected override async Task GenerateAutoentitiesIntoEntities()
+        {
+            await Task.CompletedTask;
+        }
+
+        public async Task<JsonArray?> QueryAutoentitiesAsync(Autoentity autoentity)
+        {
+            string include = string.Join(",", autoentity.Patterns.Include);
+            string exclude = string.Join(",", autoentity.Patterns.Exclude);
+            string namePattern = autoentity.Patterns.Name;
+            string getAutoentitiesQuery = SqlQueryBuilder.BuildGetAutoentitiesQuery();
+            Dictionary<string, DbConnectionParam> parameters = new()
+            {
+                { $"{BaseQueryStructure.PARAM_NAME_PREFIX}include_pattern", new(include, null, SqlDbType.NVarChar) },
+                { $"{BaseQueryStructure.PARAM_NAME_PREFIX}exclude_pattern", new(exclude, null, SqlDbType.NVarChar) },
+                { $"{BaseQueryStructure.PARAM_NAME_PREFIX}name_pattern", new(namePattern, null, SqlDbType.NVarChar) }
+            };
+
+            _logger.LogInformation("Query for Autoentities is being executed with the following parameters.");
+            _logger.LogInformation($"Autoentities include pattern: {include}");
+            _logger.LogInformation($"Autoentities exclude pattern: {exclude}");
+            _logger.LogInformation($"Autoentities name pattern: {namePattern}");
+
+            JsonArray? resultArray = await QueryExecutor.ExecuteQueryAsync(
+                sqltext: getAutoentitiesQuery,
+                parameters: parameters,
+                dataReaderHandler: QueryExecutor.GetJsonArrayAsync,
+                dataSourceName: _dataSourceName);
+
+            return resultArray;
         }
     }
 }

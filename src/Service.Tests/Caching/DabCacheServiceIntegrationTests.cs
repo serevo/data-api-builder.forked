@@ -740,6 +740,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Caching
         {
             Entity entity = new(
                 Source: new EntitySource(string.Empty, null, null, null),
+                Fields: null,
                 GraphQL: new EntityGraphQLOptions(string.Empty, string.Empty),
                 Rest: new EntityRestOptions(),
                 Permissions: Array.Empty<EntityPermission>(),
@@ -759,12 +760,13 @@ namespace Azure.DataApiBuilder.Service.Tests.Caching
             });
 
             Mock<RuntimeConfig> mockRuntimeConfig = new(
-                string.Empty,
-                dataSource,
-                entities,
-                null,
-                null,
-                null
+                string.Empty,       // Schema
+                dataSource,         // DataSource
+                entities,           // Entities
+                null,               // Autoentities
+                null,               // Runtime
+                null,               // DataSourceFiles
+                null                // AzureKeyVault
             );
             mockRuntimeConfig
                 .Setup(c => c.GetDataSourceFromDataSourceName(It.IsAny<string>()))

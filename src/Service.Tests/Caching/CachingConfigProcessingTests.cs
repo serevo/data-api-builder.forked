@@ -5,7 +5,6 @@ using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Azure.DataApiBuilder.Config;
-using Azure.DataApiBuilder.Config.Converters;
 using Azure.DataApiBuilder.Config.ObjectModel;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
@@ -56,10 +55,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
             json: fullConfig,
             out RuntimeConfig? config,
-            logger: null,
-            connectionString: null,
-            replaceEnvVar: false,
-            replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+            replacementSettings: null);
 
         // Assert
         Assert.IsNotNull(config, message: "Config must not be null, runtime config JSON deserialization failed.");
@@ -103,10 +99,7 @@ public class CachingConfigProcessingTests
         bool isParsingSuccessful = RuntimeConfigLoader.TryParseConfig(
             json: fullConfig,
             out _,
-            logger: null,
-            connectionString: null,
-            replaceEnvVar: false,
-            replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+            replacementSettings: null);
 
         // Assert
         Assert.IsFalse(isParsingSuccessful, message: "Expected JSON parsing to fail.");
@@ -141,10 +134,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
             json: fullConfig,
             out RuntimeConfig? config,
-            logger: null,
-            connectionString: null,
-            replaceEnvVar: false,
-            replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+            replacementSettings: null);
 
         // Assert
         Assert.IsNotNull(config, message: "Config must not be null, runtime config JSON deserialization failed.");
@@ -171,8 +161,6 @@ public class CachingConfigProcessingTests
     [DataRow(@",""cache"": { ""enabled"": true, ""ttl-seconds"": 0 }", DisplayName = "EntityCacheOptions.TtlSeconds set to zero is invalid configuration.")]
     [DataRow(@",""cache"": { ""enabled"": true, ""ttl-seconds"": -1 }", DisplayName = "EntityCacheOptions.TtlSeconds set to negative number is invalid configuration.")]
     [DataRow(@",""cache"": { ""enabled"": true, ""ttl-seconds"": 1.1 }", DisplayName = "EntityCacheOptions.TtlSeconds set to decimal is invalid configuration.")]
-    [DataRow(@",""cache"": { ""enabled"": 1 }", DisplayName = "EntityCacheOptions.Enabled property set to 1 should fail because not a boolean.")]
-    [DataRow(@",""cache"": { ""enabled"": 0 }", DisplayName = "EntityCacheOptions.Enabled property set to 0 should fail because not a boolean.")]
     [DataRow(@",""cache"": 1", DisplayName = "EntityCacheOptions property set to 1 should fail because it's not a JSON object.")]
     [DataRow(@",""cache"": 0", DisplayName = "EntityCacheOptions property set to 0 should fail because it's not a JSON object.")]
     [DataRow(@",""cache"": true", DisplayName = "EntityCacheOptions property set to true should fail because it's not a JSON object.")]
@@ -187,10 +175,7 @@ public class CachingConfigProcessingTests
         bool parsingSuccessful = RuntimeConfigLoader.TryParseConfig(
             json: fullConfig,
             out _,
-            logger: null,
-            connectionString: null,
-            replaceEnvVar: false,
-            replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+            replacementSettings: null);
 
         // Assert
         Assert.IsFalse(parsingSuccessful, message: "Expected JSON parsing to fail.");
@@ -216,10 +201,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
                        json: fullConfig,
                        out RuntimeConfig? config,
-                       logger: null,
-                       connectionString: null,
-                       replaceEnvVar: false,
-                       replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+                       replacementSettings: null);
 
         // Assert
         Assert.IsNotNull(config, message: "Config must not be null, runtime config JSON deserialization failed.");
@@ -252,10 +234,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
                        json: fullConfig,
                        out RuntimeConfig? config,
-                       logger: null,
-                       connectionString: null,
-                       replaceEnvVar: false,
-                       replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+                       replacementSettings: null);
         Assert.IsNotNull(config, message: "Test setup failure. Config must not be null, runtime config JSON deserialization failed.");
 
         // Act
@@ -300,10 +279,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
                        json: fullConfig,
                        out RuntimeConfig? config,
-                       logger: null,
-                       connectionString: null,
-                       replaceEnvVar: false,
-                       replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+                       replacementSettings: null);
         Assert.IsNotNull(config, message: "Test setup failure. Config must not be null, runtime config JSON deserialization failed.");
 
         // Act
@@ -342,10 +318,7 @@ public class CachingConfigProcessingTests
         RuntimeConfigLoader.TryParseConfig(
                        json: fullConfig,
                        out RuntimeConfig? config,
-                       logger: null,
-                       connectionString: null,
-                       replaceEnvVar: false,
-                       replacementFailureMode: EnvironmentVariableReplacementFailureMode.Throw);
+                       replacementSettings: null);
         Assert.IsNotNull(config, message: "Test setup failure. Config must not be null, runtime config JSON deserialization failed.");
 
         // Act
@@ -408,7 +381,7 @@ public class CachingConfigProcessingTests
                     ""allow-credentials"": false
                         },
                   ""authentication"": {
-                    ""provider"": ""StaticWebApps""
+                    ""provider"": ""AppService""
                         },
                   ""mode"": ""production""
                   }" + globalCacheConfig +

@@ -105,7 +105,7 @@ query ($id: ID, $partitionKeyValue: String) {
                 queryName: "invalidAuthModel_by_pk",
                 query: MoonWithInvalidAuthorizationPolicy,
                 variables: new() { { "id", id }, { "partitionKeyValue", id } },
-                authToken: AuthTestHelper.CreateStaticWebAppsEasyAuthToken(specificRole: clientRoleHeader),
+                authToken: AuthTestHelper.CreateAppServiceEasyAuthToken(),
                 clientRoleHeader: clientRoleHeader);
 
             // Validate the result contains the GraphQL authorization error code.
@@ -710,6 +710,7 @@ type Planet @model(name:""Planet"") {
             EntityPermission[] permissions = new[] { new EntityPermission(Role: AuthorizationResolver.ROLE_ANONYMOUS, Actions: new[] { createAction, readAction, deleteAction }) };
 
             Entity entity = new(Source: new($"graphqldb.{_containerName}", null, null, null),
+                                  Fields: null,
                                   Rest: null,
                                   GraphQL: new(Singular: "Planet", Plural: "Planets"),
                                   Permissions: permissions,

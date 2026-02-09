@@ -119,6 +119,7 @@ public class HealthEndpointCachingTests
     {
         Entity requiredEntity = new(
             Health: new(enabled: true),
+            Fields: null,
             Source: new("books", EntitySourceType.Table, null, null),
             Rest: new(Enabled: true),
             GraphQL: new("book", "books", true),
@@ -147,7 +148,7 @@ public class HealthEndpointCachingTests
             ConfigurationTests.GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL),
             Options: null,
             Health: new(true));
-        HostOptions hostOptions = new(Mode: HostMode.Development, Cors: null, Authentication: new() { Provider = nameof(EasyAuthType.StaticWebApps) });
+        HostOptions hostOptions = new(Mode: HostMode.Development, Cors: null, Authentication: new() { Provider = nameof(EasyAuthType.AppService) });
 
         RuntimeConfig runtimeConfig = new(
             Schema: string.Empty,

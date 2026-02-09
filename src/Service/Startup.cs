@@ -348,7 +348,16 @@ namespace Azure.DataApiBuilder.Service
                     return handler;
                 });
 
-            if (runtimeConfig is not null && runtimeConfig.Runtime?.Host?.Mode is HostMode.Development)
+            bool isMcpStdio = Configuration.GetValue<bool>("MCP:StdioMode");
+
+            if (isMcpStdio)
+            {
+                // Explicitly force Simulator when running in MCP stdio mode.
+                services.AddAuthentication(
+                        defaultScheme: SimulatorAuthenticationDefaults.AUTHENTICATIONSCHEME)
+                    .AddSimulatorAuthentication();
+            }
+            else if (runtimeConfig is not null && runtimeConfig.Runtime?.Host?.Mode is HostMode.Development)
             {
                 // Development mode implies support for "Hot Reload". The V2 authentication function
                 // wires up all DAB supported authentication providers (schemes) so that at request time,
@@ -456,7 +465,54 @@ namespace Azure.DataApiBuilder.Service
 
             services.AddDabMcpServer(configProvider);
 
+            services.AddSingleton<IMcpStdioServer, McpStdioServer>();
+
+            // Add Response Compression services based on config
+            ConfigureResponseCompression(services, runtimeConfig);
+
             services.AddControllers();
+        }
+
+        /// <summary>
+        /// Configures HTTP response compression based on the runtime configuration.
+        /// Compression is applied at the middleware level and supports Gzip and Brotli.
+        /// Applies to REST, GraphQL, and MCP endpoints.
+        /// </summary>
+        private void ConfigureResponseCompression(IServiceCollection services, RuntimeConfig? runtimeConfig)
+        {
+            CompressionLevel compressionLevel = runtimeConfig?.Runtime?.Compression?.Level ?? CompressionOptions.DEFAULT_LEVEL;
+
+            // Only configure compression if level is not None
+            if (compressionLevel == CompressionLevel.None)
+            {
+                return;
+            }
+
+            System.IO.Compression.CompressionLevel systemCompressionLevel = compressionLevel switch
+            {
+                CompressionLevel.Fastest => System.IO.Compression.CompressionLevel.Fastest,
+                CompressionLevel.Optimal => System.IO.Compression.CompressionLevel.Optimal,
+                _ => System.IO.Compression.CompressionLevel.Optimal
+            };
+
+            services.AddResponseCompression(options =>
+            {
+                options.EnableForHttps = true;
+                options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProvider>();
+                options.Providers.Add<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProvider>();
+            });
+
+            services.Configure<Microsoft.AspNetCore.ResponseCompression.GzipCompressionProviderOptions>(options =>
+            {
+                options.Level = systemCompressionLevel;
+            });
+
+            services.Configure<Microsoft.AspNetCore.ResponseCompression.BrotliCompressionProviderOptions>(options =>
+            {
+                options.Level = systemCompressionLevel;
+            });
+
+            _logger.LogInformation("Response compression enabled with level '{compressionLevel}' for REST, GraphQL, and MCP endpoints.", compressionLevel);
         }
 
         /// <summary>
@@ -602,6 +658,13 @@ namespace Azure.DataApiBuilder.Service
                     context => !(context.Request.Path.StartsWithSegments("/health") || context.Request.Path.StartsWithSegments("/graphql")),
                     appBuilder => appBuilder.UseHttpsRedirection()
                 );
+            }
+
+            // Response compression middleware should be placed early in the pipeline.
+            // Only use if compression is not set to None.
+            if (runtimeConfig?.Runtime?.Compression?.Level is not CompressionLevel.None)
+            {
+                app.UseResponseCompression();
             }
 
             // URL Rewrite middleware MUST be called prior to UseRouting().
@@ -787,21 +850,18 @@ namespace Azure.DataApiBuilder.Service
 
                     if (easyAuthType == EasyAuthType.AppService && !appServiceEnvironmentDetected)
                     {
-                        if (isProductionMode)
-                        {
-                            throw new DataApiBuilderException(
-                                message: AppServiceAuthenticationInfo.APPSERVICE_PROD_MISSING_ENV_CONFIG,
-                                statusCode: System.Net.HttpStatusCode.ServiceUnavailable,
-                                subStatusCode: DataApiBuilderException.SubStatusCodes.ErrorInInitialization);
-                        }
-                        else
-                        {
-                            _logger.LogWarning(AppServiceAuthenticationInfo.APPSERVICE_DEV_MISSING_ENV_CONFIG);
-                        }
+                        _logger.LogWarning(AppServiceAuthenticationInfo.APPSERVICE_DEV_MISSING_ENV_CONFIG);
                     }
 
-                    services.AddAuthentication(EasyAuthAuthenticationDefaults.AUTHENTICATIONSCHEME)
-                        .AddEasyAuthAuthentication(easyAuthAuthenticationProvider: easyAuthType);
+                    string defaultScheme = easyAuthType == EasyAuthType.AppService
+                        ? EasyAuthAuthenticationDefaults.APPSERVICEAUTHSCHEME
+                        : EasyAuthAuthenticationDefaults.SWAAUTHSCHEME;
+
+                    services.AddAuthentication(defaultScheme)
+                            .AddEnvDetectedEasyAuth();
+
+                    _logger.LogInformation("Registered EasyAuth scheme: {Scheme}", defaultScheme);
+
                 }
                 else if (mode == HostMode.Development && authOptions.IsAuthenticationSimulatorEnabled())
                 {
@@ -822,7 +882,7 @@ namespace Azure.DataApiBuilder.Service
             {
                 // Sets EasyAuth as the default authentication scheme when runtime configuration
                 // is not present.
-                SetStaticWebAppsAuthentication(services);
+                SetAppServiceAuthentication(services);
             }
         }
 
@@ -1014,13 +1074,13 @@ namespace Azure.DataApiBuilder.Service
         }
 
         /// <summary>
-        /// Sets Static Web Apps EasyAuth as the authentication scheme for the engine.
+        /// Sets App Service EasyAuth as the authentication scheme for the engine.
         /// </summary>
         /// <param name="services">The service collection where authentication services are added.</param>
-        private static void SetStaticWebAppsAuthentication(IServiceCollection services)
+        private static void SetAppServiceAuthentication(IServiceCollection services)
         {
-            services.AddAuthentication(EasyAuthAuthenticationDefaults.AUTHENTICATIONSCHEME)
-                    .AddEasyAuthAuthentication(EasyAuthType.StaticWebApps);
+            services.AddAuthentication(EasyAuthAuthenticationDefaults.APPSERVICEAUTHSCHEME)
+                .AddEnvDetectedEasyAuth();
         }
 
         /// <summary>

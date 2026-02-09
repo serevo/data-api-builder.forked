@@ -116,10 +116,11 @@ public class EndToEndTests
         string[] args = { "init", "-c", TEST_RUNTIME_CONFIG_FILE, "--connection-string", SAMPLE_TEST_CONN_STRING, "--database-type", "mssql", "--rest.path", "/rest-api", "--rest.enabled", "false", "--graphql.path", "/graphql-api" };
         Program.Execute(args, _cliLogger!, _fileSystem!, _runtimeConfigLoader!);
 
+        DeserializationVariableReplacementSettings replacementSettings = new(azureKeyVaultOptions: null, doReplaceEnvVar: true, doReplaceAkvVar: true);
         Assert.IsTrue(_runtimeConfigLoader!.TryLoadConfig(
             TEST_RUNTIME_CONFIG_FILE,
             out RuntimeConfig? runtimeConfig,
-            replaceEnvVar: true));
+            replacementSettings: replacementSettings));
 
         SqlConnectionStringBuilder builder = new(runtimeConfig.DataSource.ConnectionString);
         Assert.AreEqual(ProductInfo.GetDataApiBuilderUserAgent(), builder.ApplicationName);
@@ -195,10 +196,11 @@ public class EndToEndTests
 
         Program.Execute(args.ToArray(), _cliLogger!, _fileSystem!, _runtimeConfigLoader!);
 
+        DeserializationVariableReplacementSettings replacementSettings = new(azureKeyVaultOptions: null, doReplaceEnvVar: true, doReplaceAkvVar: true);
         Assert.IsTrue(_runtimeConfigLoader!.TryLoadConfig(
             TEST_RUNTIME_CONFIG_FILE,
             out RuntimeConfig? runtimeConfig,
-            replaceEnvVar: true));
+            replacementSettings: replacementSettings));
 
         Assert.IsNotNull(runtimeConfig);
         Assert.AreEqual(expectedDbType, runtimeConfig.DataSource.DatabaseType);
@@ -224,7 +226,7 @@ public class EndToEndTests
     public void TestAddEntity()
     {
         string[] initArgs = { "init", "-c", TEST_RUNTIME_CONFIG_FILE, "--host-mode", "development", "--database-type",
-            "mssql", "--connection-string", TEST_ENV_CONN_STRING, "--auth.provider", "StaticWebApps" };
+            "mssql", "--connection-string", TEST_ENV_CONN_STRING, "--auth.provider", "AppService" };
         Program.Execute(initArgs, _cliLogger!, _fileSystem!, _runtimeConfigLoader!);
 
         Assert.IsTrue(_runtimeConfigLoader!.TryLoadConfig(TEST_RUNTIME_CONFIG_FILE, out RuntimeConfig? runtimeConfig));
@@ -771,9 +773,11 @@ public class EndToEndTests
         CollectionAssert.AreEqual(new string[] { "todo_id" }, relationship.LinkingSourceFields);
         CollectionAssert.AreEqual(new string[] { "id" }, relationship.LinkingTargetFields);
 
-        Assert.IsNotNull(entity.Mappings);
-        Assert.AreEqual("identity", entity.Mappings["id"]);
-        Assert.AreEqual("Company Name", entity.Mappings["name"]);
+        Assert.IsNotNull(entity.Fields);
+        Assert.AreEqual(2, entity.Fields.Count);
+        Assert.AreEqual(entity.Fields[0].Alias, "identity");
+        Assert.AreEqual(entity.Fields[1].Alias, "Company Name");
+        Assert.IsNull(entity.Mappings);
     }
 
     /// <summary>

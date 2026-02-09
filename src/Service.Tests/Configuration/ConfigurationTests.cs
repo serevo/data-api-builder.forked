@@ -50,6 +50,7 @@ using Moq.Protected;
 using Serilog;
 using VerifyMSTest;
 using static Azure.DataApiBuilder.Config.FileSystemRuntimeConfigLoader;
+using static Azure.DataApiBuilder.Core.AuthenticationHelpers.AppServiceAuthentication;
 using static Azure.DataApiBuilder.Service.Tests.Configuration.ConfigurationEndpoints;
 using static Azure.DataApiBuilder.Service.Tests.Configuration.TestConfigFileReader;
 
@@ -74,7 +75,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
         private const string BROWSER_ACCEPT_HEADER = "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
 
         private const int RETRY_COUNT = 5;
-        private const int RETRY_WAIT_SECONDS = 1;
+        private const int RETRY_WAIT_SECONDS = 2;
 
         /// <summary>
         ///
@@ -393,7 +394,7 @@ namespace Azure.DataApiBuilder.Service.Tests.Configuration
                     ""allow-credentials"": false
                 },
                 ""authentication"": {
-                    ""provider"": ""StaticWebApps""
+                    ""provider"": ""AppService""
                 },
                 ""mode"": ""development""
                 }
@@ -656,9 +657,49 @@ type Moon {
                                         },
                                         ""host"": {
                                             ""authentication"": {
-                                                ""provider"": ""StaticWebApps""
+                                                ""provider"": ""AppService""
                                             }
                                         }
+                                    },
+                                    ""entities"":{ }
+                                }";
+
+        public const string CONFIG_FILE_WITH_BOOLEAN_AS_ENV = @"{
+                                    // Link for latest draft schema.
+                                    ""$schema"":""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                                    ""data-source"": {
+                                        ""database-type"": ""mssql"",
+                                        ""connection-string"": ""sample-conn-string"",
+                                        ""health"": {
+                                            ""enabled"": <REPLACE_VALUE>
+                                        }
+                                    },
+                                    ""runtime"": {
+                                        ""health"": {
+                                            ""enabled"": <REPLACE_VALUE>
+                                        },
+                                        ""rest"": {
+                                            ""enabled"": <REPLACE_VALUE>,
+                                            ""path"": ""/api""
+                                        },
+                                        ""graphql"": {
+                                            ""enabled"": <REPLACE_VALUE>,
+                                            ""path"": ""/graphql"",
+                                            ""allow-introspection"": true
+                                        },
+                                        ""host"": {
+                                            ""authentication"": {
+                                                ""provider"": ""AppService""
+                                            }
+                                        },
+                                        ""telemetry"": {
+                                            ""application-insights"":{
+                                                ""enabled"":  <REPLACE_VALUE>,
+                                                ""connection-string"":""sample-ai-connection-string""
+                                            }
+
+                                        }
+
                                     },
                                     ""entities"":{ }
                                 }";
@@ -838,9 +879,9 @@ type Moon {
 
             // Act
             bool configParsed = RuntimeConfigLoader.TryParseConfig(
-                runtimeConfig.ToJson(),
-                out RuntimeConfig updatedRuntimeConfig,
-                replaceEnvVar: true);
+                json: runtimeConfig.ToJson(),
+                config: out RuntimeConfig updatedRuntimeConfig,
+                replacementSettings: new(doReplaceEnvVar: true));
 
             // Assert
             Assert.AreEqual(
@@ -891,9 +932,9 @@ type Moon {
 
             // Act
             bool configParsed = RuntimeConfigLoader.TryParseConfig(
-                runtimeConfig.ToJson(),
-                out RuntimeConfig updatedRuntimeConfig,
-                replaceEnvVar: true);
+                json: runtimeConfig.ToJson(),
+                config: out RuntimeConfig updatedRuntimeConfig,
+                replacementSettings: new(doReplaceEnvVar: true));
 
             // Assert
             Assert.AreEqual(
@@ -956,9 +997,9 @@ type Moon {
 
             // Act
             bool configParsed = RuntimeConfigLoader.TryParseConfig(
-                runtimeConfig.ToJson(),
-                out RuntimeConfig updatedRuntimeConfig,
-                replaceEnvVar: true);
+                json: runtimeConfig.ToJson(),
+                config: out RuntimeConfig updatedRuntimeConfig,
+                replacementSettings: new(doReplaceEnvVar: true));
 
             // Assert
             Assert.AreEqual(
@@ -1128,7 +1169,7 @@ type Moon {
                 await httpClient.GetAsync($"/{OPENAPI_SWAGGER_ENDPOINT}");
             Assert.AreEqual(HttpStatusCode.ServiceUnavailable, preConfigOpenApiSwaggerEndpointAvailability.StatusCode);
 
-            HttpStatusCode responseCode = await HydratePostStartupConfiguration(httpClient, content, configurationEndpoint);
+            HttpStatusCode responseCode = await HydratePostStartupConfiguration(httpClient, content, configurationEndpoint, configuration.Runtime.Rest);
 
             // When the authorization resolver is properly configured, authorization will have failed
             // because no auth headers are present.
@@ -1140,10 +1181,21 @@ type Moon {
             // Sends a GET request to a protected entity which requires a specific role to access.
             // Authorization will pass because proper auth headers are present.
             HttpRequestMessage message = new(method: HttpMethod.Get, requestUri: $"api/{POST_STARTUP_CONFIG_ENTITY}");
-            string swaTokenPayload = AuthTestHelper.CreateStaticWebAppsEasyAuthToken(
-                addAuthenticated: true,
-                specificRole: POST_STARTUP_CONFIG_ROLE);
-            message.Headers.Add(Config.ObjectModel.AuthenticationOptions.CLIENT_PRINCIPAL_HEADER, swaTokenPayload);
+
+            // Use an AppService EasyAuth principal carrying the required role when
+            // authentication is configured to use AppService.
+            string appServiceTokenPayload = AuthTestHelper.CreateAppServiceEasyAuthToken(
+                roleClaimType: Config.ObjectModel.AuthenticationOptions.ROLE_CLAIM_TYPE,
+                additionalClaims:
+                [
+                    new AppServiceClaim
+                    {
+                        Typ = Config.ObjectModel.AuthenticationOptions.ROLE_CLAIM_TYPE,
+                        Val = POST_STARTUP_CONFIG_ROLE
+                    }
+                ]);
+
+            message.Headers.Add(Config.ObjectModel.AuthenticationOptions.CLIENT_PRINCIPAL_HEADER, appServiceTokenPayload);
             message.Headers.Add(AuthorizationResolver.CLIENT_ROLE_HEADER, POST_STARTUP_CONFIG_ROLE);
             HttpResponseMessage authorizedResponse = await httpClient.SendAsync(message);
             Assert.AreEqual(expected: HttpStatusCode.OK, actual: authorizedResponse.StatusCode);
@@ -1613,6 +1665,7 @@ type Moon {
             // creating an entity with invalid table name
             Entity entityWithInvalidSourceName = new(
                 Source: new("bokos", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "book", Plural: "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -1622,6 +1675,7 @@ type Moon {
 
             Entity entityWithInvalidSourceType = new(
                 Source: new("publishers", EntitySourceType.StoredProcedure, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "publisher", Plural: "publishers"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_AUTHENTICATED) },
@@ -1684,6 +1738,7 @@ type Moon {
             // creating an entity with invalid table name
             Entity entityWithInvalidSource = new(
                 Source: new(null, EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "book", Plural: "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -1694,6 +1749,7 @@ type Moon {
             // creating an entity with invalid source object and adding relationship with an entity with invalid source
             Entity entityWithInvalidSourceAndRelationship = new(
                 Source: new(null, EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "publisher", Plural: "publishers"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -1804,8 +1860,44 @@ type Moon {
             JsonConfigSchemaValidator jsonSchemaValidator = new(schemaValidatorLogger.Object, new MockFileSystem());
 
             JsonSchemaValidationResult result = jsonSchemaValidator.ValidateJsonConfigWithSchema(jsonSchema, jsonData);
-            Assert.IsTrue(result.IsValid);
+            Assert.AreEqual("", String.Join('\n', result.ValidationErrors?.Select(s => $"{s.Message} at {s.Path} {s.LineNumber} {s.LinePosition}") ?? []), "Expected no validation errors.");
             Assert.IsTrue(EnumerableUtilities.IsNullOrEmpty(result.ValidationErrors));
+
+            Assert.IsTrue(result.IsValid);
+            schemaValidatorLogger.Verify(
+                x => x.Log(
+                    LogLevel.Information,
+                    It.IsAny<EventId>(),
+                    It.Is<It.IsAnyType>((o, t) => o.ToString()!.Contains($"The config satisfies the schema requirements.")),
+                    It.IsAny<Exception>(),
+                    (Func<It.IsAnyType, Exception, string>)It.IsAny<object>()),
+                Times.Once);
+        }
+
+        [DataTestMethod]
+        [DataRow("true", DisplayName = "Validates variable boolean schema for true value")]
+        [DataRow("false", DisplayName = "Validates variable boolean schema for false value.")]
+        [DataRow("\"true\"", DisplayName = "Validates variable boolean schema for true as string.")]
+        [DataRow("\"false\"", DisplayName = "Validates variable boolean schema for false as string.")]
+        [DataRow("\"1\"", DisplayName = "Validates variable boolean schema for 1 as string.")]
+        [DataRow("\"0\"", DisplayName = "Validates variable boolean schema for 0as string.")]
+        [DataRow("\"@env('SAMPLE')\"", DisplayName = "Validates variable boolean schema for environment variables.")]
+        [DataRow("\"@akv('SAMPLE')\"", DisplayName = "Validates variable boolean schema for keyvaul variables.")]
+        public void TestBasicConfigSchemaWithFlexibleBoolean(string Value)
+        {
+            Mock<ILogger<JsonConfigSchemaValidator>> schemaValidatorLogger = new();
+
+            string jsonSchema = File.ReadAllText("dab.draft.schema.json");
+
+            JsonConfigSchemaValidator jsonSchemaValidator = new(schemaValidatorLogger.Object, new MockFileSystem());
+
+            string jsonData = CONFIG_FILE_WITH_BOOLEAN_AS_ENV.Replace("<REPLACE_VALUE>", Value);
+            JsonSchemaValidationResult result = jsonSchemaValidator.ValidateJsonConfigWithSchema(jsonSchema, jsonData);
+            Assert.AreEqual("", String.Join('\n', result.ValidationErrors?.Select(s => $"{s.Message} at {s.Path} {s.LineNumber} {s.LinePosition}") ?? []), "Expected no validation errors.");
+
+            Assert.IsTrue(EnumerableUtilities.IsNullOrEmpty(result.ValidationErrors), "Validation Erros null of empty");
+
+            Assert.IsTrue(result.IsValid, "Result should be valid");
             schemaValidatorLogger.Verify(
                 x => x.Log(
                     LogLevel.Information,
@@ -2342,7 +2434,12 @@ type Moon {
            HttpStatusCode expectedResponseStatusCode)
         {
             string configJson = TestHelper.AddPropertiesToJson(TestHelper.BASE_CONFIG, entityJson);
-            RuntimeConfigLoader.TryParseConfig(configJson, out RuntimeConfig deserializedConfig, logger: null, GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL));
+            RuntimeConfigLoader.TryParseConfig(
+                configJson,
+                out RuntimeConfig deserializedConfig,
+                replacementSettings: new(),
+                logger: null,
+                GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL));
             string configFileName = "custom-config.json";
             File.WriteAllText(configFileName, deserializedConfig.ToJson());
             string[] args = new[]
@@ -2425,7 +2522,12 @@ type Moon {
             // The configuration file is constructed by merging hard-coded JSON strings to simulate the scenario where users manually edit the
             // configuration file (instead of using CLI).
             string configJson = TestHelper.AddPropertiesToJson(TestHelper.BASE_CONFIG, BOOK_ENTITY_JSON);
-            Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configJson, out RuntimeConfig deserializedConfig, logger: null, GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL)));
+            Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(
+                configJson,
+                out RuntimeConfig deserializedConfig,
+                replacementSettings: new(),
+                logger: null,
+                GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL)));
             string configFileName = "custom-config.json";
             File.WriteAllText(configFileName, deserializedConfig.ToJson());
             string[] args = new[]
@@ -2484,7 +2586,7 @@ type Moon {
         {
             const string CUSTOM_CONFIG = "custom-config.json";
             string runtimeBaseRoute = "/base-route";
-            TestHelper.ConstructNewConfigWithSpecifiedHostMode(CUSTOM_CONFIG, HostMode.Production, TestCategory.MSSQL, runtimeBaseRoute: runtimeBaseRoute);
+            TestHelper.ConstructNewConfigWithSpecifiedHostMode(CUSTOM_CONFIG, HostMode.Production, TestCategory.MSSQL, runtimeBaseRoute: runtimeBaseRoute, "StaticWebApps");
             string[] args = new[]
             {
                     $"--ConfigFileName={CUSTOM_CONFIG}"
@@ -2524,26 +2626,37 @@ type Moon {
         /// <param name="expectedStatusCodeForGraphQL">Expected HTTP status code code for the GraphQL request</param>
         [DataTestMethod]
         [TestCategory(TestCategory.MSSQL)]
-        [DataRow(true, true, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Both Rest and GraphQL endpoints enabled globally")]
-        [DataRow(true, false, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest enabled and GraphQL endpoints disabled globally")]
-        [DataRow(false, true, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest disabled and GraphQL endpoints enabled globally")]
-        [DataRow(true, true, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Both Rest and GraphQL endpoints enabled globally")]
-        [DataRow(true, false, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest enabled and GraphQL endpoints disabled globally")]
-        [DataRow(false, true, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest disabled and GraphQL endpoints enabled globally")]
-        public async Task TestGlobalFlagToEnableRestAndGraphQLForHostedAndNonHostedEnvironment(
+        [DataRow(true, true, true, HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest, GraphQL, and MCP enabled globally")]
+        [DataRow(true, true, false, HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest and GraphQL enabled, MCP disabled globally")]
+        [DataRow(true, false, true, HttpStatusCode.OK, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest enabled, GraphQL disabled, and MCP enabled globally")]
+        [DataRow(true, false, false, HttpStatusCode.OK, HttpStatusCode.NotFound, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest enabled, GraphQL and MCP disabled globally")]
+        [DataRow(false, true, true, HttpStatusCode.NotFound, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest disabled, GraphQL and MCP enabled globally")]
+        [DataRow(false, true, false, HttpStatusCode.NotFound, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest disabled, GraphQL enabled, and MCP disabled globally")]
+        [DataRow(false, false, true, HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT, DisplayName = "V1 - Rest and GraphQL disabled, MCP enabled globally")]
+        [DataRow(true, true, true, HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest, GraphQL, and MCP enabled globally")]
+        [DataRow(true, true, false, HttpStatusCode.OK, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest and GraphQL enabled, MCP disabled globally")]
+        [DataRow(true, false, true, HttpStatusCode.OK, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest enabled, GraphQL disabled, and MCP enabled globally")]
+        [DataRow(true, false, false, HttpStatusCode.OK, HttpStatusCode.NotFound, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest enabled, GraphQL and MCP disabled globally")]
+        [DataRow(false, true, true, HttpStatusCode.NotFound, HttpStatusCode.OK, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest disabled, GraphQL and MCP enabled globally")]
+        [DataRow(false, true, false, HttpStatusCode.NotFound, HttpStatusCode.OK, HttpStatusCode.NotFound, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest disabled, GraphQL enabled, and MCP disabled globally")]
+        [DataRow(false, false, true, HttpStatusCode.NotFound, HttpStatusCode.NotFound, HttpStatusCode.OK, CONFIGURATION_ENDPOINT_V2, DisplayName = "V2 - Rest and GraphQL disabled, MCP enabled globally")]
+        public async Task TestGlobalFlagToEnableRestGraphQLAndMcpForHostedAndNonHostedEnvironment(
             bool isRestEnabled,
             bool isGraphQLEnabled,
+            bool isMcpEnabled,
             HttpStatusCode expectedStatusCodeForREST,
             HttpStatusCode expectedStatusCodeForGraphQL,
+            HttpStatusCode expectedStatusCodeForMcp,
             string configurationEndpoint)
         {
             GraphQLRuntimeOptions graphqlOptions = new(Enabled: isGraphQLEnabled);
             RestRuntimeOptions restRuntimeOptions = new(Enabled: isRestEnabled);
+            McpRuntimeOptions mcpRuntimeOptions = new(Enabled: isMcpEnabled);
 
             DataSource dataSource = new(DatabaseType.MSSQL,
                 GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL), Options: null);
 
-            RuntimeConfig configuration = InitMinimalRuntimeConfig(dataSource, graphqlOptions, restRuntimeOptions, null);
+            RuntimeConfig configuration = InitMinimalRuntimeConfig(dataSource, graphqlOptions, restRuntimeOptions, mcpRuntimeOptions);
             const string CUSTOM_CONFIG = "custom-config.json";
             File.WriteAllText(CUSTOM_CONFIG, configuration.ToJson());
 
@@ -2566,17 +2679,23 @@ type Moon {
 
                 object payload = new { query };
 
-                HttpRequestMessage graphQLRequest = new(HttpMethod.Post, "/graphql")
+                // GraphQL request
+                HttpRequestMessage graphQLRequest = new(HttpMethod.Post, configuration.Runtime.GraphQL.Path)
                 {
                     Content = JsonContent.Create(payload)
                 };
 
                 HttpResponseMessage graphQLResponse = await client.SendAsync(graphQLRequest);
-                Assert.AreEqual(expectedStatusCodeForGraphQL, graphQLResponse.StatusCode);
+                Assert.AreEqual(expectedStatusCodeForGraphQL, graphQLResponse.StatusCode, "The GraphQL response is different from the expected result.");
 
-                HttpRequestMessage restRequest = new(HttpMethod.Get, "/api/Book");
+                // REST request
+                HttpRequestMessage restRequest = new(HttpMethod.Get, $"{configuration.Runtime.Rest.Path}/Book");
                 HttpResponseMessage restResponse = await client.SendAsync(restRequest);
-                Assert.AreEqual(expectedStatusCodeForREST, restResponse.StatusCode);
+                Assert.AreEqual(expectedStatusCodeForREST, restResponse.StatusCode, "The REST response is different from the expected result.");
+
+                // MCP request
+                HttpStatusCode mcpResponseCode = await GetMcpResponse(client, configuration.Runtime.Mcp);
+                Assert.AreEqual(expectedStatusCodeForMcp, mcpResponseCode, "The MCP response is different from the expected result.");
             }
 
             // Hosted Scenario
@@ -2586,18 +2705,19 @@ type Moon {
             {
                 JsonContent content = GetPostStartupConfigParams(MSSQL_ENVIRONMENT, configuration, configurationEndpoint);
 
-                HttpResponseMessage postResult =
-                await client.PostAsync(configurationEndpoint, content);
-                Assert.AreEqual(HttpStatusCode.OK, postResult.StatusCode);
+                HttpResponseMessage postResult = await client.PostAsync(configurationEndpoint, content);
+                Assert.AreEqual(HttpStatusCode.OK, postResult.StatusCode, "The hydration post-response is different from the expected result.");
 
-                HttpStatusCode restResponseCode = await GetRestResponsePostConfigHydration(client);
+                HttpStatusCode restResponseCode = await GetRestResponsePostConfigHydration(client, configuration.Runtime.Rest);
+                Assert.AreEqual(expected: expectedStatusCodeForREST, actual: restResponseCode, "The REST hydration post-response is different from the expected result.");
 
-                Assert.AreEqual(expected: expectedStatusCodeForREST, actual: restResponseCode);
+                HttpStatusCode graphqlResponseCode = await GetGraphQLResponsePostConfigHydration(client, configuration.Runtime.GraphQL);
+                Assert.AreEqual(expected: expectedStatusCodeForGraphQL, actual: graphqlResponseCode, "The GraphQL hydration post-response is different from the expected result.");
 
-                HttpStatusCode graphqlResponseCode = await GetGraphQLResponsePostConfigHydration(client);
-
-                Assert.AreEqual(expected: expectedStatusCodeForGraphQL, actual: graphqlResponseCode);
-
+                // TODO: Issue #3012 - Currently DAB is unable to start MCP with the hydration post-response.
+                // This needs to be fixed before uncommenting the MCP check
+                // HttpStatusCode mcpResponseCode = await GetMcpResponse(client, configuration.Runtime.Mcp);
+                // Assert.AreEqual(expected: expectedStatusCodeForMcp, actual: mcpResponseCode, "The MCP hydration post-response is different from the expected result.");
             }
         }
 
@@ -2642,6 +2762,7 @@ type Moon {
                        new EntityPermission( Role: AuthorizationResolver.ROLE_AUTHENTICATED , Actions: new[] { readAction, createAction, deleteAction })};
 
             Entity entity = new(Source: new("stocks", EntitySourceType.Table, null, null),
+                                  Fields: null,
                                   Rest: null,
                                   GraphQL: new(Singular: "Stock", Plural: "Stocks"),
                                   Permissions: permissions,
@@ -2658,12 +2779,30 @@ type Moon {
                 $"--ConfigFileName={CUSTOM_CONFIG}"
             };
 
-            string authToken = AuthTestHelper.CreateStaticWebAppsEasyAuthToken();
+            string authToken = AuthTestHelper.CreateAppServiceEasyAuthToken();
             using (TestServer server = new(Program.CreateWebHostBuilder(args)))
             using (HttpClient client = server.CreateClient())
             {
                 try
                 {
+                    // Pre-clean to avoid PK violation if a previous run left the row behind.
+                    string preCleanupDeleteMutation = @"
+                        mutation {
+                            deleteStock(categoryid: 5001, pieceid: 5001) {
+                                categoryid
+                                pieceid
+                            }
+                        }";
+
+                    _ = await GraphQLRequestExecutor.PostGraphQLRequestAsync(
+                    client,
+                    server.Services.GetRequiredService<RuntimeConfigProvider>(),
+                    query: preCleanupDeleteMutation,
+                    queryName: "deleteStock",
+                    variables: null,
+                    authToken: authToken,
+                    clientRoleHeader: AuthorizationResolver.ROLE_AUTHENTICATED);
+
                     // A create mutation operation is executed in the context of Anonymous role. The Anonymous role has create action configured but lacks
                     // read action. As a result, a new record should be created in the database but the mutation operation should return an error message.
                     string graphQLMutation = @"
@@ -2688,7 +2827,8 @@ type Moon {
                         query: graphQLMutation,
                         queryName: "createStock",
                         variables: null,
-                        clientRoleHeader: null
+                        authToken: null,
+                        clientRoleHeader: AuthorizationResolver.ROLE_ANONYMOUS
                         );
 
                     Assert.IsNotNull(mutationResponse);
@@ -2944,6 +3084,7 @@ type Moon {
                        new EntityPermission( Role: AuthorizationResolver.ROLE_AUTHENTICATED , Actions: new[] { createAction })};
 
             Entity entity = new(Source: new("stocks", EntitySourceType.Table, null, null),
+                                  Fields: null,
                                   Rest: null,
                                   GraphQL: new(Singular: "Stock", Plural: "Stocks"),
                                   Permissions: permissions,
@@ -2989,7 +3130,7 @@ type Moon {
                         query: graphQLMutation,
                         queryName: "createStock",
                         variables: null,
-                        authToken: AuthTestHelper.CreateStaticWebAppsEasyAuthToken(),
+                        authToken: AuthTestHelper.CreateAppServiceEasyAuthToken(),
                         clientRoleHeader: AuthorizationResolver.ROLE_AUTHENTICATED
                         );
 
@@ -3072,6 +3213,7 @@ type Moon {
             if (entityType is EntitySourceType.StoredProcedure)
             {
                 Entity entity = new(Source: new("get_books", EntitySourceType.StoredProcedure, null, null),
+                              Fields: null,
                               Rest: new(new SupportedHttpVerb[] { SupportedHttpVerb.Get, SupportedHttpVerb.Post }),
                               GraphQL: null,
                               Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -3171,6 +3313,7 @@ type Moon {
             if (entityType is EntitySourceType.StoredProcedure)
             {
                 Entity entity = new(Source: new("get_books", EntitySourceType.StoredProcedure, null, null),
+                              Fields: null,
                               Rest: new(new SupportedHttpVerb[] { SupportedHttpVerb.Get, SupportedHttpVerb.Post }),
                               GraphQL: null,
                               Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -3282,7 +3425,12 @@ type Moon {
 
             // The BASE_CONFIG omits the rest.request-body-strict option in the runtime section.
             string configJson = TestHelper.AddPropertiesToJson(TestHelper.BASE_CONFIG, entityJson);
-            RuntimeConfigLoader.TryParseConfig(configJson, out RuntimeConfig deserializedConfig, logger: null, GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL));
+            RuntimeConfigLoader.TryParseConfig(
+                configJson,
+                out RuntimeConfig deserializedConfig,
+                replacementSettings: new(),
+                logger: null,
+                GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL));
             const string CUSTOM_CONFIG = "custom-config.json";
             File.WriteAllText(CUSTOM_CONFIG, deserializedConfig.ToJson());
             string[] args = new[]
@@ -3296,7 +3444,7 @@ type Moon {
                 HttpMethod httpMethod = SqlTestHelper.ConvertRestMethodToHttpMethod(SupportedHttpVerb.Post);
                 string requestBody = @"{
                         ""title"": ""Harry Potter and the Order of Phoenix"",
-                        ""publisher_id"": 1234";
+                        ""publisher_id"": 1234 ";
 
                 if (includeExtraneousFieldInRequestBody)
                 {
@@ -3344,6 +3492,7 @@ type Moon {
                 GetConnectionStringFromEnvironmentConfig(environment: TestCategory.MSSQL), Options: null);
             Entity viewEntity = new(
                 Source: new("books_view_all", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: true),
                 GraphQL: new("", ""),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -3548,7 +3697,7 @@ type Planet @model(name:""PlanetAlias"") {
         [TestCategory(TestCategory.MSSQL)]
         [DataRow(HostMode.Development, EasyAuthType.AppService, false, false, DisplayName = "AppService Dev - No EnvVars - No Error")]
         [DataRow(HostMode.Development, EasyAuthType.AppService, true, false, DisplayName = "AppService Dev - EnvVars - No Error")]
-        [DataRow(HostMode.Production, EasyAuthType.AppService, false, true, DisplayName = "AppService Prod - No EnvVars - Error")]
+        [DataRow(HostMode.Production, EasyAuthType.AppService, false, false, DisplayName = "AppService Prod - No EnvVars - Error")]
         [DataRow(HostMode.Production, EasyAuthType.AppService, true, false, DisplayName = "AppService Prod - EnvVars - Error")]
         [DataRow(HostMode.Development, EasyAuthType.StaticWebApps, false, false, DisplayName = "SWA Dev - No EnvVars - No Error")]
         [DataRow(HostMode.Development, EasyAuthType.StaticWebApps, true, false, DisplayName = "SWA Dev - EnvVars - No Error")]
@@ -3582,8 +3731,10 @@ type Planet @model(name:""PlanetAlias"") {
             string[] args = new[]
             {
             $"--ConfigFileName={CUSTOM_CONFIG}"
-        };
+            };
 
+            // When host is in Production mode with AppService as Identity Provider and the environment variables are not set
+            // we do not throw an exception any longer(PR: 2943), instead log a warning to the user. In this case expectError is false.
             // This test only checks for startup errors, so no requests are sent to the test server.
             try
             {
@@ -3637,7 +3788,7 @@ type Planet @model(name:""PlanetAlias"") {
             using (HttpClient client = server.CreateClient())
             {
                 JsonContent content = GetPostStartupConfigParams(MSSQL_ENVIRONMENT, configuration, configurationEndpoint);
-                HttpStatusCode responseCode = await HydratePostStartupConfiguration(client, content, configurationEndpoint);
+                HttpStatusCode responseCode = await HydratePostStartupConfiguration(client, content, configurationEndpoint, configuration.Runtime.Rest);
 
                 Assert.AreEqual(expected: HttpStatusCode.OK, actual: responseCode, message: "Configuration hydration failed.");
 
@@ -3683,6 +3834,7 @@ type Planet @model(name:""PlanetAlias"") {
 
             Entity entity = new(
                 Source: new("graphql_incompatible", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: false),
                 GraphQL: new("graphql_incompatible", "graphql_incompatibles", entityGraphQLEnabled),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4261,6 +4413,176 @@ type Planet @model(name:""PlanetAlias"") {
             }
         }
 
+        /// <summary>
+        /// Test validates that autoentities section can be deserialized and serialized correctly.
+        /// </summary>
+        [DataTestMethod]
+        [TestCategory(TestCategory.MSSQL)]
+        [DataRow(null, null, null, null, null, null, null, null, null, "anonymous", EntityActionOperation.Read)]
+        [DataRow(new[] { "%.%" }, new[] { "%.%" }, "{object}", true, true, true, false, 5, EntityCacheLevel.L1L2, "anonymous", EntityActionOperation.Read)]
+        [DataRow(new[] { "books.%" }, new[] { "books.pages.%" }, "books_{object}", false, false, false, true, 2147483647, EntityCacheLevel.L1, "test-user", EntityActionOperation.Delete)]
+        [DataRow(new[] { "books.%" }, null, "books_{object}", false, null, false, null, 2147483647, null, "test-user", EntityActionOperation.Delete)]
+        [DataRow(null, new[] { "books.pages.%" }, null, null, false, null, true, null, EntityCacheLevel.L1, "test-user", EntityActionOperation.Delete)]
+        [DataRow(new[] { "title.%", "books.%", "names.%" }, new[] { "names.%", "%.%" }, "{schema}.{object}", true, false, false, true, 1, null, "second-test-user", EntityActionOperation.Create)]
+        public void TestAutoEntitiesSerializationDeserialization(
+            string[]? include,
+            string[]? exclude,
+            string? name,
+            bool? restEnabled,
+            bool? graphqlEnabled,
+            bool? healthCheckEnabled,
+            bool? cacheEnabled,
+            int? cacheTTL,
+            EntityCacheLevel? cacheLevel,
+            string role,
+            EntityActionOperation entityActionOp)
+        {
+            TestHelper.SetupDatabaseEnvironment(MSSQL_ENVIRONMENT);
+
+            Dictionary<string, Autoentity> createdAutoentity = new();
+            createdAutoentity.Add("test-entity",
+                new Autoentity(
+                    Patterns: new AutoentityPatterns(include, exclude, name),
+                    Template: new AutoentityTemplate(
+                        Rest: restEnabled == null ? null : new EntityRestOptions(Enabled: (bool)restEnabled),
+                        GraphQL: graphqlEnabled == null ? null : new EntityGraphQLOptions(Singular: string.Empty, Plural: string.Empty, Enabled: (bool)graphqlEnabled),
+                        Health: healthCheckEnabled == null ? null : new EntityHealthCheckConfig(healthCheckEnabled),
+                        Cache: (cacheEnabled == null && cacheTTL == null && cacheLevel == null) ? null : new EntityCacheOptions(Enabled: cacheEnabled, TtlSeconds: cacheTTL, Level: cacheLevel)
+                    ),
+                    Permissions: new EntityPermission[1]));
+
+            EntityAction[] entityActions = new EntityAction[] { new(entityActionOp, null, null) };
+            createdAutoentity["test-entity"].Permissions[0] = new EntityPermission(role, entityActions);
+            RuntimeAutoentities autoentities = new(createdAutoentity);
+
+            FileSystemRuntimeConfigLoader baseLoader = TestHelper.GetRuntimeConfigLoader();
+            baseLoader.TryLoadKnownConfig(out RuntimeConfig? baseConfig);
+
+            RuntimeConfig config = new(
+                Schema: baseConfig!.Schema,
+                DataSource: baseConfig.DataSource,
+                Runtime: new(
+                    Rest: new(),
+                    GraphQL: new(),
+                    Mcp: new(),
+                    Host: new(null, null),
+                    Telemetry: new()
+                ),
+                Entities: baseConfig.Entities,
+                Autoentities: autoentities
+            );
+
+            string configWithCustomJson = config.ToJson();
+            Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(configWithCustomJson, out RuntimeConfig? deserializedRuntimeConfig));
+
+            string serializedConfig = deserializedRuntimeConfig.ToJson();
+
+            using (JsonDocument parsedDocument = JsonDocument.Parse(serializedConfig))
+            {
+                JsonElement root = parsedDocument.RootElement;
+                JsonElement autoentitiesElement = root.GetProperty("autoentities");
+
+                bool entityExists = autoentitiesElement.TryGetProperty("test-entity", out JsonElement entityElement);
+                Assert.AreEqual(expected: true, actual: entityExists);
+
+                // Validate patterns properties and their values exists in autoentities
+                bool expectedPatternsExist = include != null || exclude != null || name != null;
+                bool patternsExists = entityElement.TryGetProperty("patterns", out JsonElement patternsElement);
+                Assert.AreEqual(expected: expectedPatternsExist, actual: patternsExists);
+
+                if (patternsExists)
+                {
+                    bool includeExists = patternsElement.TryGetProperty("include", out JsonElement includeElement);
+                    Assert.AreEqual(expected: (include != null), actual: includeExists);
+                    if (includeExists)
+                    {
+                        CollectionAssert.AreEqual(expected: include, actual: includeElement.EnumerateArray().Select(e => e.GetString()).ToArray());
+                    }
+
+                    bool excludeExists = patternsElement.TryGetProperty("exclude", out JsonElement excludeElement);
+                    Assert.AreEqual(expected: (exclude != null), actual: excludeExists);
+                    if (excludeExists)
+                    {
+                        CollectionAssert.AreEqual(expected: exclude, actual: excludeElement.EnumerateArray().Select(e => e.GetString()).ToArray());
+                    }
+
+                    bool nameExists = patternsElement.TryGetProperty("name", out JsonElement nameElement);
+                    Assert.AreEqual(expected: (name != null), actual: nameExists);
+                    if (nameExists)
+                    {
+                        Assert.AreEqual(expected: name, actual: nameElement.GetString());
+                    }
+                }
+
+                // Validate template properties and their values exists in autoentities
+                bool expectedTemplateExist = restEnabled != null || graphqlEnabled != null || healthCheckEnabled != null
+                    || cacheEnabled != null || cacheLevel != null || cacheTTL != null;
+                bool templateExists = entityElement.TryGetProperty("template", out JsonElement templateElement);
+                Assert.AreEqual(expected: expectedTemplateExist, actual: templateExists);
+
+                if (templateExists)
+                {
+                    bool restPropertyExists = templateElement.TryGetProperty("rest", out JsonElement restElement);
+                    Assert.AreEqual(expected: (restEnabled != null), actual: restPropertyExists);
+                    if (restPropertyExists)
+                    {
+                        Assert.IsTrue(restElement.TryGetProperty("enabled", out JsonElement restEnabledElement));
+                        Assert.AreEqual(expected: restEnabled, actual: restEnabledElement.GetBoolean());
+                    }
+
+                    bool graphqlPropertyExists = templateElement.TryGetProperty("graphql", out JsonElement graphqlElement);
+                    Assert.AreEqual(expected: (graphqlEnabled != null), actual: graphqlPropertyExists);
+                    if (graphqlPropertyExists)
+                    {
+                        Assert.IsTrue(graphqlElement.TryGetProperty("enabled", out JsonElement graphqlEnabledElement));
+                        Assert.AreEqual(expected: graphqlEnabled, actual: graphqlEnabledElement.GetBoolean());
+                    }
+
+                    bool healthPropertyExists = templateElement.TryGetProperty("health", out JsonElement healthElement);
+                    Assert.AreEqual(expected: (healthCheckEnabled != null), actual: healthPropertyExists);
+                    if (healthPropertyExists)
+                    {
+                        Assert.IsTrue(healthElement.TryGetProperty("enabled", out JsonElement healthEnabledElement));
+                        Assert.AreEqual(expected: healthCheckEnabled, actual: healthEnabledElement.GetBoolean());
+                    }
+
+                    bool expectedCacheExist = cacheEnabled != null || cacheTTL != null || cacheLevel != null;
+                    bool cachePropertyExists = templateElement.TryGetProperty("cache", out JsonElement cacheElement);
+                    Assert.AreEqual(expected: expectedCacheExist, actual: cachePropertyExists);
+                    if (cacheEnabled != null)
+                    {
+                        Assert.IsTrue(cacheElement.TryGetProperty("enabled", out JsonElement cacheEnabledElement));
+                        Assert.AreEqual(expected: cacheEnabled, actual: cacheEnabledElement.GetBoolean());
+                    }
+
+                    if (cacheTTL != null)
+                    {
+                        Assert.IsTrue(cacheElement.TryGetProperty("ttl-seconds", out JsonElement cacheTtlElement));
+                        Assert.AreEqual(expected: cacheTTL, actual: cacheTtlElement.GetInt32());
+                    }
+
+                    if (cacheLevel != null)
+                    {
+                        Assert.IsTrue(cacheElement.TryGetProperty("level", out JsonElement cacheLevelElement));
+                        Assert.IsTrue(string.Equals(cacheLevel.ToString(), cacheLevelElement.GetString(), StringComparison.OrdinalIgnoreCase));
+                    }
+                }
+
+                // Validate permissions properties and their values exists in autoentities
+                JsonElement permissionsElement = entityElement.GetProperty("permissions");
+
+                bool roleExists = permissionsElement[0].TryGetProperty("role", out JsonElement roleElement);
+                Assert.AreEqual(expected: true, actual: roleExists);
+                Assert.AreEqual(expected: role, actual: roleElement.GetString());
+
+                bool entityActionsExists = permissionsElement[0].TryGetProperty("actions", out JsonElement entityActionsElement);
+                Assert.AreEqual(expected: true, actual: entityActionsExists);
+                bool entityActionOpExists = entityActionsElement[0].TryGetProperty("action", out JsonElement entityActionOpElement);
+                Assert.AreEqual(expected: true, actual: entityActionOpExists);
+                Assert.IsTrue(string.Equals(entityActionOp.ToString(), entityActionOpElement.GetString(), StringComparison.OrdinalIgnoreCase));
+            }
+        }
+
 #nullable disable
 
         /// <summary>
@@ -4308,6 +4630,7 @@ type Planet @model(name:""PlanetAlias"") {
             // file creation function.
             Entity requiredEntity = new(
                 Source: new("books", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: false),
                 GraphQL: new("book", "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4369,6 +4692,7 @@ type Planet @model(name:""PlanetAlias"") {
             // config file creation.
             Entity requiredEntity = new(
                 Source: new("books", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: false),
                 GraphQL: new("book", "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4418,6 +4742,7 @@ type Planet @model(name:""PlanetAlias"") {
             // Create the entities under test.
             Entity restEnabledEntity = new(
                 Source: new("books", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: true),
                 GraphQL: new("", "", false),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4426,6 +4751,7 @@ type Planet @model(name:""PlanetAlias"") {
 
             Entity restDisabledEntity = new(
                 Source: new("publishers", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: false),
                 GraphQL: new("publisher", "publishers", true),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4508,6 +4834,7 @@ type Planet @model(name:""PlanetAlias"") {
             // file creation function.
             Entity requiredEntity = new(
                 Source: new("bookmarks", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: true),
                 GraphQL: new(Singular: "", Plural: "", Enabled: false),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -4633,6 +4960,7 @@ type Planet @model(name:""PlanetAlias"") {
 
             Entity requiredEntity = new(
                 Source: new("bookmarks", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: new(Enabled: true),
                 GraphQL: new(Singular: "", Plural: "", Enabled: false),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -5225,41 +5553,67 @@ type Planet @model(name:""PlanetAlias"") {
         /// by executing HTTP requests against the engine until a non-503 error is received.
         /// </summary>
         /// <param name="httpClient">Client used for request execution.</param>
-        /// <param name="config">Post-startup configuration</param>
+        /// <param name="content">New config file content that will be added to DAB.</param>
+        /// <param name="configurationEndpoint">Endpoint through which content will be sent to DAB."</param>
+        /// <param name="rest">Global settings used at runtime for REST APIs.</param>
         /// <returns>ServiceUnavailable if service is not successfully hydrated with config</returns>
-        private static async Task<HttpStatusCode> HydratePostStartupConfiguration(HttpClient httpClient, JsonContent content, string configurationEndpoint)
+        private static async Task<HttpStatusCode> HydratePostStartupConfiguration(HttpClient httpClient, JsonContent content, string configurationEndpoint, RestRuntimeOptions rest)
         {
-            // Hydrate configuration post-startup
-            HttpResponseMessage postResult =
-                await httpClient.PostAsync(configurationEndpoint, content);
-            Assert.AreEqual(HttpStatusCode.OK, postResult.StatusCode);
+            string appServiceTokenPayload = AuthTestHelper.CreateAppServiceEasyAuthToken(
+                roleClaimType: Config.ObjectModel.AuthenticationOptions.ROLE_CLAIM_TYPE,
+                additionalClaims:
+                [
+                    new AppServiceClaim
+                    {
+                        Typ = Config.ObjectModel.AuthenticationOptions.ROLE_CLAIM_TYPE,
+                        Val = POST_STARTUP_CONFIG_ROLE
+                    }
+                ]);
 
-            return await GetRestResponsePostConfigHydration(httpClient);
+            using HttpRequestMessage postRequest = new(HttpMethod.Post, configurationEndpoint)
+            {
+                Content = content
+            };
+
+            postRequest.Headers.Add(
+                Config.ObjectModel.AuthenticationOptions.CLIENT_PRINCIPAL_HEADER,
+                appServiceTokenPayload);
+
+            HttpResponseMessage postResult = await httpClient.SendAsync(postRequest);
+            string body = await postResult.Content.ReadAsStringAsync();
+            Assert.AreEqual(HttpStatusCode.OK, postResult.StatusCode, body);
+
+            return await GetRestResponsePostConfigHydration(httpClient, rest);
         }
 
         /// <summary>
         /// Executing REST requests against the engine until a non-503 error is received.
         /// </summary>
         /// <param name="httpClient">Client used for request execution.</param>
+        /// <param name="rest">Global settings used at runtime for REST APIs.</param>
         /// <returns>ServiceUnavailable if service is not successfully hydrated with config,
         /// else the response code from the REST request</returns>
-        private static async Task<HttpStatusCode> GetRestResponsePostConfigHydration(HttpClient httpClient)
+        private static async Task<HttpStatusCode> GetRestResponsePostConfigHydration(HttpClient httpClient, RestRuntimeOptions rest)
         {
-            // Retry request RETRY_COUNT times in 1 second increments to allow required services
-            // time to instantiate and hydrate permissions.
-            int retryCount = RETRY_COUNT;
+            // Retry request RETRY_COUNT times in exponential increments to allow
+            // required services time to instantiate and hydrate permissions because
+            // the DAB services may take an unpredictable amount of time to become ready.
+            //
+            // The service might still fail due to the service not being available yet,
+            // but it is highly unlikely to be the case.
+            int retryCount = 0;
             HttpStatusCode responseCode = HttpStatusCode.ServiceUnavailable;
-            while (retryCount > 0)
+            while (retryCount < RETRY_COUNT)
             {
                 // Spot test authorization resolver utilization to ensure configuration is used.
                 HttpResponseMessage postConfigHydrationResult =
-                    await httpClient.GetAsync($"api/{POST_STARTUP_CONFIG_ENTITY}");
+                    await httpClient.GetAsync($"{rest.Path}/{POST_STARTUP_CONFIG_ENTITY}");
                 responseCode = postConfigHydrationResult.StatusCode;
 
                 if (postConfigHydrationResult.StatusCode == HttpStatusCode.ServiceUnavailable)
                 {
-                    retryCount--;
-                    Thread.Sleep(TimeSpan.FromSeconds(RETRY_WAIT_SECONDS));
+                    retryCount++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(RETRY_WAIT_SECONDS, retryCount)));
                     continue;
                 }
 
@@ -5275,13 +5629,17 @@ type Planet @model(name:""PlanetAlias"") {
         /// <param name="httpClient">Client used for request execution.</param>
         /// <returns>ServiceUnavailable if service is not successfully hydrated with config,
         /// else the response code from the GRAPHQL request</returns>
-        private static async Task<HttpStatusCode> GetGraphQLResponsePostConfigHydration(HttpClient httpClient)
+        private static async Task<HttpStatusCode> GetGraphQLResponsePostConfigHydration(HttpClient httpClient, GraphQLRuntimeOptions graphQL)
         {
-            // Retry request RETRY_COUNT times in 1 second increments to allow required services
-            // time to instantiate and hydrate permissions.
-            int retryCount = RETRY_COUNT;
+            // Retry request RETRY_COUNT times in exponential increments to allow
+            // required services time to instantiate and hydrate permissions because
+            // the DAB services may take an unpredictable amount of time to become ready.
+            //
+            // The service might still fail due to the service not being available yet,
+            // but it is highly unlikely to be the case.
+            int retryCount = 0;
             HttpStatusCode responseCode = HttpStatusCode.ServiceUnavailable;
-            while (retryCount > 0)
+            while (retryCount < RETRY_COUNT)
             {
                 string query = @"{
                     book_by_pk(id: 1) {
@@ -5293,7 +5651,7 @@ type Planet @model(name:""PlanetAlias"") {
 
                 object payload = new { query };
 
-                HttpRequestMessage graphQLRequest = new(HttpMethod.Post, "/graphql")
+                HttpRequestMessage graphQLRequest = new(HttpMethod.Post, graphQL.Path)
                 {
                     Content = JsonContent.Create(payload)
                 };
@@ -5303,8 +5661,55 @@ type Planet @model(name:""PlanetAlias"") {
 
                 if (responseCode == HttpStatusCode.ServiceUnavailable)
                 {
-                    retryCount--;
-                    Thread.Sleep(TimeSpan.FromSeconds(RETRY_WAIT_SECONDS));
+                    retryCount++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(RETRY_WAIT_SECONDS, retryCount)));
+                    continue;
+                }
+
+                break;
+            }
+
+            return responseCode;
+        }
+
+        /// <summary>	
+        /// Executing MCP POST requests against the engine until a non-503 error is received.	
+        /// </summary>	
+        /// <param name="httpClient">Client used for request execution.</param>	
+        /// <returns>ServiceUnavailable if service is not successfully hydrated with config,	
+        /// else the response code from the MCP request</returns>	
+        public static async Task<HttpStatusCode> GetMcpResponse(HttpClient httpClient, McpRuntimeOptions mcp)
+        {
+            // Retry request RETRY_COUNT times in exponential increments to allow
+            // required services time to instantiate and hydrate permissions because
+            // the DAB services may take an unpredictable amount of time to become ready.
+            //
+            // The service might still fail due to the service not being available yet,
+            // but it is highly unlikely to be the case.
+            int retryCount = 0;
+            HttpStatusCode responseCode = HttpStatusCode.ServiceUnavailable;
+            while (retryCount < RETRY_COUNT)
+            {
+                // Minimal MCP request (list tools) – valid JSON-RPC request
+                object payload = new
+                {
+                    jsonrpc = "2.0",
+                    id = 1,
+                    method = "tools/list"
+                };
+                HttpRequestMessage mcpRequest = new(HttpMethod.Post, mcp.Path)
+                {
+                    Content = JsonContent.Create(payload)
+                };
+                mcpRequest.Headers.Add("Accept", "*/*");
+
+                HttpResponseMessage mcpResponse = await httpClient.SendAsync(mcpRequest);
+                responseCode = mcpResponse.StatusCode;
+
+                if (responseCode == HttpStatusCode.ServiceUnavailable || responseCode == HttpStatusCode.NotFound)
+                {
+                    retryCount++;
+                    await Task.Delay(TimeSpan.FromSeconds(Math.Pow(RETRY_WAIT_SECONDS, retryCount)));
                     continue;
                 }
 
@@ -5349,6 +5754,7 @@ type Planet @model(name:""PlanetAlias"") {
                                                       LinkingTargetFields: null);
 
             Entity bookEntity = new(Source: new("books", EntitySourceType.Table, null, null),
+                                    Fields: null,
                                     Rest: null,
                                     GraphQL: new(Singular: "book", Plural: "books"),
                                     Permissions: permissions,
@@ -5372,6 +5778,7 @@ type Planet @model(name:""PlanetAlias"") {
 
             Entity publisherEntity = new(
                 Source: new("publishers", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "publisher", Plural: "publishers"),
                 Permissions: permissions,
@@ -5405,6 +5812,7 @@ type Planet @model(name:""PlanetAlias"") {
         {
             entity ??= new(
                 Source: new("books", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "book", Plural: "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },
@@ -5422,6 +5830,7 @@ type Planet @model(name:""PlanetAlias"") {
             // Adding an entity with only Authorized Access
             Entity anotherEntity = new(
                 Source: new("publishers", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "publisher", Plural: "publishers"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_AUTHENTICATED) },
@@ -5430,7 +5839,7 @@ type Planet @model(name:""PlanetAlias"") {
                 );
             entityMap.Add("Publisher", anotherEntity);
 
-            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: nameof(EasyAuthType.StaticWebApps), null);
+            Config.ObjectModel.AuthenticationOptions authenticationOptions = new(Provider: nameof(EasyAuthType.AppService), null);
 
             return new(
                 Schema: "IntegrationTestMinimalSchema",
@@ -5474,7 +5883,7 @@ type Planet @model(name:""PlanetAlias"") {
             string sqlFile = new FileSystemRuntimeConfigLoader(fileSystem).GetFileNameForEnvironment(environment, considerOverrides: true);
             string configPayload = File.ReadAllText(sqlFile);
 
-            RuntimeConfigLoader.TryParseConfig(configPayload, out RuntimeConfig runtimeConfig, replaceEnvVar: true);
+            RuntimeConfigLoader.TryParseConfig(configPayload, out RuntimeConfig runtimeConfig, replacementSettings: new());
 
             return runtimeConfig.DataSource.ConnectionString;
         }
@@ -5529,6 +5938,7 @@ type Planet @model(name:""PlanetAlias"") {
         {
             Entity entity = new(
                 Source: new("books", EntitySourceType.Table, null, null),
+                Fields: null,
                 Rest: null,
                 GraphQL: new(Singular: "book", Plural: "books"),
                 Permissions: new[] { GetMinimalPermissionConfig(AuthorizationResolver.ROLE_ANONYMOUS) },

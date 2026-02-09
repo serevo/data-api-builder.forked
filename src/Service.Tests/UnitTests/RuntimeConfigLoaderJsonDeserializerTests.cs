@@ -13,7 +13,10 @@ using Azure.DataApiBuilder.Config;
 using Azure.DataApiBuilder.Config.Converters;
 using Azure.DataApiBuilder.Config.ObjectModel;
 using Azure.DataApiBuilder.Service.Exceptions;
+using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
 
 namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 {
@@ -79,18 +82,18 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
                 if (replaceEnvVar)
                 {
                     Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(
-                        GetModifiedJsonString(repValues, @"""postgresql"""), out expectedConfig, replaceEnvVar: replaceEnvVar),
+                        GetModifiedJsonString(repValues, @"""postgresql"""), out expectedConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: replaceEnvVar, doReplaceAkvVar: false)),
                         "Should read the expected config");
                 }
                 else
                 {
                     Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(
-                        GetModifiedJsonString(repKeys, @"""postgresql"""), out expectedConfig, replaceEnvVar: replaceEnvVar),
+                        GetModifiedJsonString(repKeys, @"""postgresql"""), out expectedConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: replaceEnvVar, doReplaceAkvVar: false)),
                         "Should read the expected config");
                 }
 
                 Assert.IsTrue(RuntimeConfigLoader.TryParseConfig(
-                    GetModifiedJsonString(repKeys, @"""@env('enumVarName')"""), out RuntimeConfig actualConfig, replaceEnvVar: replaceEnvVar),
+                    GetModifiedJsonString(repKeys, @"""@env('enumVarName')"""), out RuntimeConfig actualConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: replaceEnvVar, doReplaceAkvVar: false)),
                     "Should read actual config");
                 Assert.AreEqual(expectedConfig.ToJson(), actualConfig.ToJson());
             }
@@ -130,7 +133,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             string configWithEnvVar = _configWithVariableDataSource.Replace("{0}", GetDataSourceConfigForGivenDatabase(databaseType));
             bool isParsingSuccessful = RuntimeConfigLoader.TryParseConfig(
-              configWithEnvVar, out RuntimeConfig runtimeConfig, replaceEnvVar: replaceEnvVar);
+              configWithEnvVar, out RuntimeConfig runtimeConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: replaceEnvVar, doReplaceAkvVar: true));
 
             // Assert
             Assert.IsTrue(isParsingSuccessful);
@@ -178,7 +181,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
 
             string configWithEnvVar = _configWithVariableDataSource.Replace("{0}", GetDataSourceOptionsForCosmosDBWithInvalidValues());
             bool isParsingSuccessful = RuntimeConfigLoader.TryParseConfig(
-              configWithEnvVar, out RuntimeConfig runtimeConfig, replaceEnvVar: true);
+              configWithEnvVar, out RuntimeConfig runtimeConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: true, doReplaceAkvVar: true));
 
             // Assert
             Assert.IsTrue(isParsingSuccessful);
@@ -213,6 +216,140 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         }
 
         /// <summary>
+        /// Test method to validate that environment variable replacement works correctly
+        /// for the telemetry.application-insights.enabled property when set through config
+        /// or through environment variables
+        /// </summary>
+        [TestMethod]
+        [DataRow(true, DisplayName = "ApplicationInsights.Enabled set to true (literal bool)")]
+        [DataRow(false, DisplayName = "ApplicationInsights.Enabled set to false (literal bool)")]
+        public void TestTelemetryApplicationInsightsEnabled(bool expected)
+        {
+            TestTelemetryApplicationInsightsEnabledInternal(expected.ToString().ToLower(), expected);
+        }
+
+        [TestMethod]
+        [DataRow("true", true, DisplayName = "ApplicationInsights.Enabled from string 'true'")]
+        [DataRow("false", false, DisplayName = "ApplicationInsights.Enabled from string 'false'")]
+        [DataRow("1", true, DisplayName = "ApplicationInsights.Enabled from string '1'")]
+        [DataRow("0", false, DisplayName = "ApplicationInsights.Enabled from string '0'")]
+        public void TestTelemetryApplicationInsightsEnabledFromString(string configSetting, bool expected)
+        {
+
+            TestTelemetryApplicationInsightsEnabledInternal($"\"{configSetting}\"", expected);
+        }
+
+        [TestMethod]
+        [DataRow("true", true, DisplayName = "ApplicationInsights.Enabled from environment 'true'")]
+        [DataRow("false", false, DisplayName = "ApplicationInsights.Enabled from environment 'false'")]
+        [DataRow("1", true, DisplayName = "ApplicationInsights.Enabled from environment '1'")]
+        [DataRow("0", false, DisplayName = "ApplicationInsights.Enabled from environment '0'")]
+        public void TestTelemetryApplicationInsightsEnabledFromEnvironment(string configSetting, bool expected)
+        {
+            // Arrange
+            const string envVarName = "APP_INSIGHTS_ENABLED";
+            string envVarValue = configSetting;
+            // Set up the environment variable
+            Environment.SetEnvironmentVariable(envVarName, envVarValue);
+
+            try
+            {
+                TestTelemetryApplicationInsightsEnabledInternal("\"@env('APP_INSIGHTS_ENABLED')\"", expected);
+            }
+            finally
+            {
+                // Cleanup
+                Environment.SetEnvironmentVariable(envVarName, null);
+            }
+
+        }
+        public static void TestTelemetryApplicationInsightsEnabledInternal(string configValue, bool expected)
+        {
+            const string AppInsightsConnectionString = "InstrumentationKey=test-key";
+
+            string configJson = @"{
+                    ""$schema"": ""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                    ""data-source"": {
+                        ""database-type"": ""mssql"",
+                        ""connection-string"": ""Server=tcp:127.0.0.1,1433;Persist Security Info=False;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=False;Connection Timeout=5;""
+                    },
+                    ""runtime"": {
+                        ""telemetry"": {
+                            ""application-insights"": {
+                                ""enabled"": " + configValue + @",
+                                ""connection-string"": """ + AppInsightsConnectionString + @"""
+                            }
+                        }
+                    },
+                    ""entities"": { }
+                }";
+
+            // Act
+            bool IsParsed = RuntimeConfigLoader.TryParseConfig(
+                configJson,
+                out RuntimeConfig runtimeConfig,
+                replacementSettings: new DeserializationVariableReplacementSettings(
+                    azureKeyVaultOptions: null,
+                    doReplaceEnvVar: true,
+                    doReplaceAkvVar: false));
+
+            // Assert
+            Assert.IsTrue(IsParsed);
+            Assert.AreEqual(AppInsightsConnectionString, runtimeConfig.Runtime.Telemetry.ApplicationInsights.ConnectionString, "Connection string should be preserved");
+            Assert.AreEqual(expected, runtimeConfig.Runtime.Telemetry.ApplicationInsights.Enabled, "ApplicationInsights enabled value should match expected value");
+        }
+
+        /// <summary>
+        ///  
+        /// </summary>
+        /// <param name="configValue">Value to set in the config to cause error</param>
+        /// <param name="message">Error message</param>
+        [TestMethod]
+        [DataRow("somenonboolean", "Invalid boolean value: somenonboolean. Specify either true or 1 for true, false or 0 for false", DisplayName = "ApplicationInsights.Enabled invalid value should error")]
+        public void TestTelemetryApplicationInsightsEnabledShouldError(string configValue, string message)
+        {
+            string configJson = @"{
+                    ""$schema"": ""https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json"",
+                    ""data-source"": {
+                        ""database-type"": ""mssql"",
+                        ""connection-string"": ""Server=tcp:127.0.0.1,1433;Persist Security Info=False;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=False;Connection Timeout=5;""
+                    },
+                    ""runtime"": {
+                        ""telemetry"": {
+                            ""application-insights"": {
+                                ""enabled"": """ + configValue + @""",
+                                ""connection-string"": ""InstrumentationKey=test-key""
+                            }
+                        }
+                    },
+                    ""entities"": { }
+                }";
+
+            // Arrange
+            Mock<ILogger> mockLogger = new();
+
+            // Act
+            bool isParsed = RuntimeConfigLoader.TryParseConfig(
+                configJson,
+                out RuntimeConfig runtimeConfig,
+                replacementSettings: new DeserializationVariableReplacementSettings(
+                    azureKeyVaultOptions: null,
+                    doReplaceEnvVar: true,
+                    doReplaceAkvVar: false),
+                logger: mockLogger.Object);
+
+            // Assert
+            Assert.IsFalse(isParsed);
+            Assert.IsNull(runtimeConfig);
+
+            Assert.AreEqual(1, mockLogger.Invocations.Count, "Should raise 1 exception");
+            Assert.AreEqual(5, mockLogger.Invocations[0].Arguments.Count, "Log should have 4 arguments");
+            var ConfigException = mockLogger.Invocations[0].Arguments[3] as JsonException;
+            Assert.IsInstanceOfType(ConfigException, typeof(JsonException), "Should have raised a Json Exception");
+            Assert.AreEqual(message, ConfigException.Message);
+        }
+
+        /// <summary>
         /// Method to validate that comments are skipped in config file (and are ignored during deserialization).
         /// </summary>
         [TestMethod]
@@ -240,6 +377,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         /// but have the effect of default values when deserialized.
         /// It starts with a minimal config and incrementally
         /// adds the optional subproperties. At each step, tests for valid deserialization.
+        /// </summary>
         [TestMethod]
         public void TestNullableOptionalProps()
         {
@@ -302,7 +440,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         {
             string json = @"{ ""foo"" : ""@env('envVarName'), @env('" + invalidEnvVarName + @"')"" }";
             SetEnvVariables();
-            StringJsonConverterFactory stringConverterFactory = new(EnvironmentVariableReplacementFailureMode.Throw);
+            StringJsonConverterFactory stringConverterFactory = new(new(doReplaceEnvVar: true, envFailureMode: EnvironmentVariableReplacementFailureMode.Throw));
             JsonSerializerOptions options = new() { PropertyNameCaseInsensitive = true };
             options.Converters.Add(stringConverterFactory);
             Assert.ThrowsException<DataApiBuilderException>(() => JsonSerializer.Deserialize<StubJsonType>(json, options));
@@ -324,7 +462,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
     ""entities"":{ }
 }";
             // replaceEnvVar: true is needed to make sure we do post-processing for the connection string case
-            Assert.IsFalse(RuntimeConfigLoader.TryParseConfig(configJson, out RuntimeConfig deserializedConfig, replaceEnvVar: true));
+            Assert.IsFalse(RuntimeConfigLoader.TryParseConfig(configJson, out RuntimeConfig deserializedConfig, replacementSettings: new DeserializationVariableReplacementSettings(azureKeyVaultOptions: null, doReplaceEnvVar: true, doReplaceAkvVar: true)));
             Assert.IsNull(deserializedConfig);
         }
 
@@ -343,7 +481,8 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             MockFileSystem fileSystem = new();
             FileSystemRuntimeConfigLoader loader = new(fileSystem);
 
-            Assert.IsFalse(loader.TryLoadConfig(configFileName, out RuntimeConfig _));
+            // Use null replacement settings for this test
+            Assert.IsFalse(loader.TryLoadConfig(configFileName, out RuntimeConfig _, replacementSettings: null));
         }
 
         /// <summary>
@@ -430,7 +569,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
     ""host"": {
       ""mode"": ""development"",
       ""cors"": {
-        ""origins"": [ """ + reps[++index % reps.Length] + @""", """ + reps[++index % reps.Length] + @""" ],
+        ""origins"": [ """ + reps[++index % reps.Length] + @""", """ + reps[++index % reps.Length] + @"""],
         ""allow-credentials"": true
       },
       ""authentication"": {
@@ -653,7 +792,7 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
             Assert.AreEqual(McpRuntimeOptions.DEFAULT_PATH, parsedConfig.McpPath);
             Assert.IsTrue(parsedConfig.AllowIntrospection);
             Assert.IsFalse(parsedConfig.IsDevelopmentMode());
-            Assert.IsTrue(parsedConfig.IsStaticWebAppsIdentityProvider);
+            Assert.IsTrue(parsedConfig.IsAppServiceIdentityProvider);
             Assert.IsTrue(parsedConfig.IsRequestBodyStrict);
             Assert.IsTrue(parsedConfig.IsLogLevelNull());
             Assert.IsTrue(parsedConfig.Runtime?.Telemetry?.ApplicationInsights is null
@@ -670,5 +809,179 @@ namespace Azure.DataApiBuilder.Service.Tests.UnitTests
         #endregion Helper Functions
 
         record StubJsonType(string Foo);
+
+        /// <summary>
+        /// Test to verify Azure Key Vault variable replacement from local .akv file.
+        /// </summary>
+        [TestMethod]
+        public void TestAkvVariableReplacementFromLocalFile()
+        {
+            // Arrange: create a temporary .akv secrets file
+            string akvFilePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".akv");
+            string secretConnectionString = "Server=tcp:127.0.0.1,1433;Persist Security Info=False;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=False;Connection Timeout=5;";
+            File.WriteAllText(akvFilePath, $"DBCONN={secretConnectionString}\nAPI_KEY=abcd\n# Comment line should be ignored\n MALFORMEDLINE \n");
+
+            // Escape backslashes for JSON
+            string escapedPath = akvFilePath.Replace("\\", "\\\\");
+
+            string jsonConfig = $$"""
+            {
+              "$schema": "https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json",
+              "data-source": {
+                "database-type": "mssql",
+                "connection-string": "@akv('DBCONN')"
+              },
+              "azure-key-vault": {
+                "endpoint": "{{escapedPath}}"
+              },
+              "entities": { }
+            }
+            """;
+
+            try
+            {
+                // Act
+                DeserializationVariableReplacementSettings replacementSettings = new(
+                    azureKeyVaultOptions: null,
+                    doReplaceEnvVar: false,
+                    doReplaceAkvVar: true);
+                bool parsed = RuntimeConfigLoader.TryParseConfig(jsonConfig, out RuntimeConfig config, replacementSettings: replacementSettings);
+
+                // Assert
+                Assert.IsTrue(parsed, "Config should parse successfully with local AKV file replacement.");
+                Assert.IsNotNull(config, "Config should not be null.");
+                Assert.AreEqual(secretConnectionString, config.DataSource.ConnectionString, "Connection string should be replaced from AKV local file secret.");
+            }
+            finally
+            {
+                // Cleanup
+                if (File.Exists(akvFilePath))
+                {
+                    File.Delete(akvFilePath);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Validates that when an AKV secret's value itself contains an @env('...') pattern, it is NOT further resolved
+        /// because replacement only runs once per original JSON token. Demonstrates that nested env patterns inside
+        /// AKV secret values are left intact.
+        /// </summary>
+        [TestMethod]
+        public void TestAkvSecretValueContainingEnvPatternIsNotEnvExpanded()
+        {
+            string akvFilePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".akv");
+            // Valid MSSQL connection string which embeds an @env('env') pattern in the Database value.
+            // This pattern should NOT be expanded because replacement only runs once on the original JSON token (@akv('DBCONN')).
+            string secretValueWithEnvPattern = "Server=localhost;Database=@env('env');User Id=sa;Password=XXXX;";
+            File.WriteAllText(akvFilePath, $"DBCONN={secretValueWithEnvPattern}\n");
+            string escapedPath = akvFilePath.Replace("\\", "\\\\");
+
+            // Set env variable to prove it would be different if expansion occurred.
+            Environment.SetEnvironmentVariable("env", "SHOULD_NOT_APPEAR");
+
+            string jsonConfig = $$"""
+            {
+              "$schema": "https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json",
+              "data-source": {
+                "database-type": "mssql",
+                "connection-string": "@akv('DBCONN')"
+              },
+              "azure-key-vault": {
+                "endpoint": "{{escapedPath}}"
+              },
+              "entities": { }
+            }
+            """;
+
+            try
+            {
+                DeserializationVariableReplacementSettings replacementSettings = new(
+                    azureKeyVaultOptions: null,
+                    doReplaceEnvVar: true,
+                    doReplaceAkvVar: true);
+                bool parsed = RuntimeConfigLoader.TryParseConfig(jsonConfig, out RuntimeConfig config, replacementSettings: replacementSettings);
+                Assert.IsTrue(parsed, "Config should parse successfully.");
+                Assert.IsNotNull(config);
+
+                string actual = config.DataSource.ConnectionString;
+                Assert.IsTrue(actual.Contains("@env('env')"), "Nested @env pattern inside AKV secret should remain unexpanded.");
+                Assert.IsFalse(actual.Contains("SHOULD_NOT_APPEAR"), "Env var value should not be expanded inside AKV secret.");
+                Assert.IsTrue(actual.Contains("Application Name="), "Application Name should be appended for MSSQL when env replacement is enabled.");
+
+                var builderOriginal = new SqlConnectionStringBuilder(secretValueWithEnvPattern.Replace("Server=", "Data Source=").Replace("Database=", "Initial Catalog="));
+                var builderActual = new SqlConnectionStringBuilder(actual);
+                Assert.AreEqual(builderOriginal["Data Source"], builderActual["Data Source"], "Server/Data Source should match.");
+                Assert.AreEqual(builderOriginal["Initial Catalog"], builderActual["Initial Catalog"], "Database/Initial Catalog should match (with env pattern retained).");
+                Assert.AreEqual(builderOriginal["User ID"], builderActual["User ID"], "User Id should match.");
+                Assert.AreEqual(builderOriginal["Password"], builderActual["Password"], "Password should match.");
+            }
+            finally
+            {
+                if (File.Exists(akvFilePath))
+                {
+                    File.Delete(akvFilePath);
+                }
+
+                Environment.SetEnvironmentVariable("env", null);
+            }
+        }
+
+        /// <summary>
+        /// Validates two-pass replacement where an env var resolves to an AKV pattern which then resolves to the secret value.
+        /// connection-string = @env('env_variable'), env_variable value = @akv('DBCONN'), AKV secret DBCONN holds the final connection string.
+        /// </summary>
+        [TestMethod]
+        public void TestEnvVariableResolvingToAkvPatternIsExpandedInSecondPass()
+        {
+            string akvFilePath = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString() + ".akv");
+            string finalSecretValue = "Server=localhost;Database=Test;User Id=sa;Password=XXXX;";
+            File.WriteAllText(akvFilePath, $"DBCONN={finalSecretValue}\n");
+            string escapedPath = akvFilePath.Replace("\\", "\\\\");
+            Environment.SetEnvironmentVariable("env_variable", "@akv('DBCONN')");
+
+            string jsonConfig = $$"""
+            {
+              "$schema": "https://github.com/Azure/data-api-builder/releases/download/vmajor.minor.patch-alpha/dab.draft.schema.json",
+              "data-source": {
+                "database-type": "mssql",
+                "connection-string": "@env('env_variable')"
+              },
+              "azure-key-vault": {
+                "endpoint": "{{escapedPath}}"
+              },
+              "entities": { }
+            }
+            """;
+
+            try
+            {
+                DeserializationVariableReplacementSettings replacementSettings = new(
+                    azureKeyVaultOptions: null,
+                    doReplaceEnvVar: true,
+                    doReplaceAkvVar: true);
+                bool parsed = RuntimeConfigLoader.TryParseConfig(jsonConfig, out RuntimeConfig config, replacementSettings: replacementSettings);
+                Assert.IsTrue(parsed, "Config should parse successfully.");
+                Assert.IsNotNull(config);
+
+                string expected = RuntimeConfigLoader.GetConnectionStringWithApplicationName(finalSecretValue);
+                var builderExpected = new SqlConnectionStringBuilder(expected);
+                var builderActual = new SqlConnectionStringBuilder(config.DataSource.ConnectionString);
+                Assert.AreEqual(builderExpected["Data Source"], builderActual["Data Source"], "Data Source should match.");
+                Assert.AreEqual(builderExpected["Initial Catalog"], builderActual["Initial Catalog"], "Initial Catalog should match.");
+                Assert.AreEqual(builderExpected["User ID"], builderActual["User ID"], "User ID should match.");
+                Assert.AreEqual(builderExpected["Password"], builderActual["Password"], "Password should match.");
+                Assert.IsTrue(builderActual.ApplicationName?.Contains("dab_"), "Application Name should be appended including product identifier.");
+            }
+            finally
+            {
+                if (File.Exists(akvFilePath))
+                {
+                    File.Delete(akvFilePath);
+                }
+
+                Environment.SetEnvironmentVariable("env_variable", null);
+            }
+        }
     }
 }
