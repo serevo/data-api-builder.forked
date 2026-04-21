@@ -3,4 +3,4 @@
 
 namespace Azure.DataApiBuilder.Config.ObjectModel;
 
-public record JwtOptions(string? Audience, string? Issuer);
+public record JwtOptions(string? Audience, string? Issuer, string? ValidateIssuer = null);
